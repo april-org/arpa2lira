@@ -89,7 +89,7 @@ namespace Arpa2Lira {
     };
     
     VocabDictionary dict;
-    static const unsigned int MAX_NGRAM_ORDER=12;
+    static const unsigned int MAX_NGRAM_ORDER=20;
     unsigned int counts[MAX_NGRAM_ORDER];
     AprilUtils::constString inputFile,workingInput;
     unsigned int ngramOrder;
