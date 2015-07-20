@@ -11,6 +11,7 @@ bin
 include
 lib
 *.o
+test/test_binarize_arpa
 
 # Emacs backups #
 #################
