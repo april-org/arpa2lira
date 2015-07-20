@@ -54,15 +54,13 @@ class BinarizeArpa {
       return x*log10;
   }
   
-public:
-  BinarizeArpa(VocabDictionary dict,
-	       const char *inputFilename,
-	       const char *outputPrefixFilename);
-
   void processArpaHeader();
-
   template<int N, int M>
   void extractNgramLevel(const char *outputFilename);
 
+public:
+  BinarizeArpa(VocabDictionary dict,
+	       const char *inputFilename);
+  void processArpa(const char *outputPrefixFilename);
 };
 

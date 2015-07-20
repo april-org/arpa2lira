@@ -9,9 +9,8 @@ int main(int argc, char **argv) {
   const char *arpa_filename   = argv[2];
   const char *prefix_filename = argv[3];
   VocabDictionary voc(vocab_filename);
-  BinarizeArpa obj(voc,arpa_filename,prefix_filename);
-  obj.processArpaHeader();
-  // obj.extractNgramLevel<1,2>();
+  BinarizeArpa obj(voc,arpa_filename);
+  obj.processArpa(prefix_filename);
   return 0;
 }
 
