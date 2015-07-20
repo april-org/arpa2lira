@@ -1,9 +1,11 @@
 #include "../src/binarize_arpa.h"
 
+using namespace Arpa2Lira;
+
 int main(int argc, char **argv) {
   if (argc != 4) {
-    fprintf(stderr,"usage: %s vocab_filename arpa_filename output_prefix\n",argv[0]);
-    exit(0);
+    ERROR_EXIT1(1, "usage: %s vocab_filename arpa_filename output_prefix\n",
+                argv[0]);
   }
   const char *vocab_filename  = argv[1];
   const char *arpa_filename   = argv[2];
@@ -13,5 +15,3 @@ int main(int argc, char **argv) {
   obj.processArpa(prefix_filename);
   return 0;
 }
-
-
