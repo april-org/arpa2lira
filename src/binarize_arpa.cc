@@ -35,7 +35,7 @@ extern "C" {
 using namespace AprilUtils;
 
 namespace Arpa2Lira {
- 
+  
   const float BinarizeArpa::logZero = 1e-12f;
   const float BinarizeArpa::logOne  = 0.0f;
   const float BinarizeArpa::log10   = 2.302585092994046; // log(10.0);
@@ -59,7 +59,7 @@ namespace Arpa2Lira {
   }
 
   void BinarizeArpa::processArpaHeader() {
-    int level;
+    unsigned int level;
     constString cs,previous;
     do {
       cs = workingInput.extract_line();
@@ -67,19 +67,22 @@ namespace Arpa2Lira {
     previous = workingInput;
     cs = workingInput.extract_line();
     while (cs.skip("ngram")) { //    ngram 1=103459
-      assert(cs.extract_int(&level));
-      assert(level== ++ngramOrder);
+      assert(cs.extract_unsigned_int(&level));
+      assert(level == ++ngramOrder);
       cs.skip("=");
-      assert(cs.extract_int(&counts[level-1]));
+      assert(cs.extract_unsigned_int(&counts[level-1]));
       // fprintf(stderr,"%d -> %d\n",level,counts[level-1]);
       previous = workingInput;
       cs = workingInput.extract_line();
       // fprintf(stderr,"Reading '%s'\n",cs.newString());
     }
     workingInput = previous;
+    if (ngramOrder > MAX_NGRAM_ORDER) {
+      ERROR_EXIT(1, "Maximum ngram order overflow\n");
+    }
   }
   
-  template<int N, int M>
+  template<unsigned int N, unsigned int M>
   void BinarizeArpa::extractNgramLevel(const char *outputPrefixFilename) {
     // fprintf(stderr,"extractNgramLevel N=%d M=%d\n",N,M);
     // skip header
@@ -91,7 +94,7 @@ namespace Arpa2Lira {
       fprintf(stderr,"reading '%s'\n",cs.newString());
     } while (!cs.is_prefix(header));
   
-    int numNgrams = counts[N-1];
+    unsigned int numNgrams = counts[N-1];
     char  *filemapped;
 
     char outputFilename[1000];
@@ -121,7 +124,7 @@ namespace Arpa2Lira {
     // mmap the output file
     if ((filemapped = (char*)mmap(0, filesize,
                                   PROT_READ|PROT_WRITE, MAP_SHARED,
-                                  f_descr, 0))  == (caddr_t)-1) {
+                                  f_descr, 0)) == (caddr_t)-1) {
       ERROR_EXIT(1, "mmap error\n");
     }
 
@@ -130,16 +133,17 @@ namespace Arpa2Lira {
     // aqui crear un vector de talla 
     Ngram<N,M> *p = (Ngram<N,M>*)filemapped;
 
-    for (int i=0; i<numNgrams; ++i) {
-      if (i>0 && i%100==0)
-        fprintf(stderr,"\r%6.2f%%",i*100.0/numNgrams);
+    for (unsigned int i=0; i<numNgrams; ++i) {
+      if (i>0 && i%100==0) {
+        fprintf(stderr,"\r%6.2f%%",i*100.0f/numNgrams);
+      }
       constString cs = workingInput.extract_line();
       //fprintf(stderr,"%s\n",cs.newString());
       float trans,bo;
       cs.extract_float(&trans);
-      p[i].values[0] = arpa_prob(trans);
+      p[i].values[NGRAM_PROB_POS] = arpa_prob(trans);
       cs.skip(1);
-      for (int j=0; j<N; ++j) {
+      for (unsigned int j=0; j<N; ++j) {
         constString word = cs.extract_token();
         cs.skip(1);
         int wordId = dict(word);
@@ -150,7 +154,7 @@ namespace Arpa2Lira {
         if (!cs.extract_float(&bo)) {
           bo = logOne;
         }
-        p[i].values[1] = arpa_prob(bo);
+        p[i].values[BACKOFF_PROB_POS] = arpa_prob(bo);
       }
     }
 
@@ -165,7 +169,7 @@ namespace Arpa2Lira {
   // unrolls a loop using templates and processes all ngram levels calling to
   // extractNgramLevel
   template<>
-  struct BinarizeArpa::extractNgramLevelUnroller<0>
+  struct BinarizeArpa::extractNgramLevelUnroller<0u>
   {
     extractNgramLevelUnroller(BinarizeArpa &binarizer,
                               const char *outputPrefixFilename) {

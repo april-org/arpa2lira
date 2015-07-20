@@ -26,38 +26,43 @@
 #include <cstring>
 #include <cassert>
 #include <string> // use in the dictionary
+#include <unordered_map>
 
 #include "constString.h"
-#include "hash_table.h"
-#include "vector.h"
+#include "error_print.h"
+
+#define NGRAM_PROB_POS   0
+#define BACKOFF_PROB_POS 1
 
 namespace Arpa2Lira {
 
   class VocabDictionary {
-    static const int MAX_WORD_SIZE = 10000;
-    AprilUtils::vector<AprilUtils::string> vocab;
-    AprilUtils::hash<const char *,unsigned int> vocabDictionary;
+    static const unsigned int MAX_WORD_SIZE = 10000u;
+    unsigned int vocabSize;
+    std::unordered_map<std::string,unsigned int> vocabDictionary;
   public:
-    VocabDictionary(const char *vocabFilename) {
+    VocabDictionary(const char *vocabFilename) : vocabSize(0u) {
       FILE *f = fopen(vocabFilename,"r");
       char word[MAX_WORD_SIZE];
       while (fscanf(f,"%s",word)==1) {
-        vocab.push_back(AprilUtils::string(word));
-        vocabDictionary[vocab.back().c_str()] = vocab.size();
+        vocabDictionary.emplace(std::string(word), ++vocabSize);
+      }
+      if (vocabDictionary.size() != vocabSize) {
+        ERROR_EXIT(1, "Improper dictionary, duplicated words found\n");
       }
       fclose(f);
     }
-    int operator()(const char *word) {
-      return vocabDictionary[word];
+    unsigned int operator()(const char *word) const {
+      return vocabDictionary.find(std::string(word))->second;
     }
-    int operator()(AprilUtils::constString cs) {
-      return vocabDictionary[(const char *)cs];
+    unsigned int operator()(AprilUtils::constString cs) const {
+      return vocabDictionary.find(std::string((const char *)cs, 0, cs.len()))->second;
     }
   };
 
-  template<int N, int M> // M may be 1 or 2
+  template<unsigned int N, unsigned int M> // M may be 1 or 2
   struct Ngram {
-    int word[N];
+    unsigned int word[N];
     float values[M]; // index 0 is transition log-probabilty, index 1 is backoff
   };
 
@@ -67,27 +72,27 @@ namespace Arpa2Lira {
      * @brief unrolls a loop using templates and processes all ngram levels
      * calling to extractNgramLevel
      */
-    template<int COUNT>
+    template<unsigned int COUNT>
     struct extractNgramLevelUnroller {
       extractNgramLevelUnroller(BinarizeArpa &binarizer,
                                 const char *outputPrefixFilename) {
         extractNgramLevelUnroller<COUNT-1>(binarizer, outputPrefixFilename);
         if (COUNT <= binarizer.ngramOrder) {
           if (COUNT == binarizer.ngramOrder) {
-            binarizer.extractNgramLevel<COUNT,1>(outputPrefixFilename);
+            binarizer.extractNgramLevel<COUNT,1u>(outputPrefixFilename);
           }
           else {
-            binarizer.extractNgramLevel<COUNT,2>(outputPrefixFilename);
+            binarizer.extractNgramLevel<COUNT,2u>(outputPrefixFilename);
           }
         }
       }
     };
     
     VocabDictionary dict;
-    static const int MAX_NGRAM_ORDER=30;
-    int counts[MAX_NGRAM_ORDER];
+    static const unsigned int MAX_NGRAM_ORDER=12;
+    unsigned int counts[MAX_NGRAM_ORDER];
     AprilUtils::constString inputFile,workingInput;
-    int ngramOrder;
+    unsigned int ngramOrder;
 
     static const float logZero;
     static const float logOne;
@@ -103,7 +108,7 @@ namespace Arpa2Lira {
     }
   
     void processArpaHeader();
-    template<int N, int M>
+    template<unsigned int N, unsigned int M>
     void extractNgramLevel(const char *outputFilename);
     
   public:
