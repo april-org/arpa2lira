@@ -33,8 +33,7 @@
 #include "smart_ptr.h"
 #include "vector.h"
 
-#define NGRAM_PROB_POS   0
-#define BACKOFF_PROB_POS 1
+#include "ngram_template.h"
 
 namespace Arpa2Lira {
 
@@ -59,20 +58,6 @@ namespace Arpa2Lira {
     }
     unsigned int operator()(AprilUtils::constString cs) const {
       return vocabDictionary.find(std::string((const char *)cs, cs.len()))->second;
-    }
-  };
-
-  template<unsigned int N, unsigned int M> // M may be 1 or 2
-  struct Ngram {
-    unsigned int word[N];
-    float values[M]; // index 0 is transition log-probabilty, index 1 is backoff
-    // for sorting purposes
-    bool operator<(const Ngram<N,M> &other) {
-      for (unsigned int i=0; i<N; ++i) {
-        if (word[i] < other.word[i]) return true;
-        else if (word[i] > other.word[i]) return false;
-      }
-      return false;
     }
   };
 
