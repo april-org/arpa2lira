@@ -72,7 +72,7 @@ namespace Arpa2Lira {
     } while (cs != "\\data\\");
     previous = workingInput;
     cs = workingInput.extract_line();
-    while (cs.skip("ngram")) { //    ngram 1=103459
+    while (cs.skip("ngram")) { // example: ngram 1=103459
       assert(cs.extract_unsigned_int(&level));
       assert(level == ++ngramOrder);
       cs.skip("=");
