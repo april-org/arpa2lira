@@ -97,7 +97,8 @@ namespace Arpa2Lira {
     constString cs;
     do {
       cs = workingInput.extract_line();
-      fprintf(stderr,"reading '%s'\n",cs.newString());
+      fprintf(stderr,"reading '%s'\n",
+              AprilUtils::UniquePtr<char []>(cs.newString()).get());
     } while (!cs.is_prefix(header));
   
     unsigned int numNgrams = counts[N-1];
