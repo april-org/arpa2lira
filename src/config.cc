@@ -37,7 +37,8 @@ namespace Arpa2Lira {
   std::string Config::tmpdir = "/tmp";
   const std::string Config::TEMPLATE_SUFIX = "/file-a2l-XXXXXX";
 
-  int Config::openTemporaryFile(int flags, AprilUtils::UniquePtr<char> &result) {
+  int Config::openTemporaryFile(int flags,
+                                AprilUtils::UniquePtr<char []> &result) {
     result.reset(new char[tmpdir.size() + TEMPLATE_SUFIX.size() + 1]);
     result = strcpy(result.get(), tmpdir.c_str());
     result = strcat(result.get(), TEMPLATE_SUFIX.c_str());

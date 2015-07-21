@@ -30,7 +30,8 @@ namespace Arpa2Lira {
     static std::string tmpdir;
     static const std::string TEMPLATE_SUFIX;
   public:
-    static int openTemporaryFile(int flags, AprilUtils::UniquePtr<char> &result);
+    static int openTemporaryFile(int flags,
+                                 AprilUtils::UniquePtr<char []> &result);
     static void setTemporaryDirectory(const char *tmpdir_);
   };
 } // namespace Arpa2Lira

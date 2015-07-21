@@ -100,7 +100,7 @@ namespace Arpa2Lira {
     unsigned int counts[MAX_NGRAM_ORDER];
     AprilUtils::constString inputFile,workingInput;
     unsigned int ngramOrder;
-    AprilUtils::UniquePtr<char> outputFilenames[MAX_NGRAM_ORDER];
+    AprilUtils::UniquePtr<char []> outputFilenames[MAX_NGRAM_ORDER];
 
     static const float logZero;
     static const float logOne;
