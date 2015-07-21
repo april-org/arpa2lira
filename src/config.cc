@@ -17,6 +17,9 @@
  * this library; if not, write to the Free Software Foundation, Inc., 59 Temple
  * Place, Suite 330, Boston, MA 02111-1307 USA
  */
+#include <cerrno>
+#include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -28,6 +31,7 @@ extern "C" {
 }
 
 // from APRIL
+#include "error_print.h"
 #include "smart_ptr.h"
 
 // from Arpa2Lira
@@ -36,16 +40,52 @@ extern "C" {
 namespace Arpa2Lira {
   std::string Config::tmpdir = "/tmp";
   const std::string Config::TEMPLATE_SUFIX = "/file-a2l-XXXXXX";
-
+  AprilUtils::vector<std::string> Config::tmp_filenames;
+  Config::SignalsManager Config::signals_manager;
+  
   int Config::openTemporaryFile(int flags,
                                 AprilUtils::UniquePtr<char []> &result) {
     result.reset(new char[tmpdir.size() + TEMPLATE_SUFIX.size() + 1]);
     result = strcpy(result.get(), tmpdir.c_str());
     result = strcat(result.get(), TEMPLATE_SUFIX.c_str());
-    return mkostemp(result.get(), flags);
+    int fd = mkostemp(result.get(), flags);
+    tmp_filenames.push_back(std::string(result.get()));
+    return fd;
   }
 
   void Config::setTemporaryDirectory(const char *tmpdir_) {
     tmpdir = tmpdir_;
   }
+
+  /////////////////////////////////////////////////////////////////////////
+  
+  Config::SignalsManager::SignalsManager() {
+    signal(SIGINT, Config::SignalsManager::signalHandler);
+    signal(SIGABRT, Config::SignalsManager::signalHandler);
+    signal(SIGTERM, Config::SignalsManager::signalHandler);
+  }
+  
+  Config::SignalsManager::~SignalsManager() {
+    removeTemporaryFiles();
+  }
+  
+  void Config::SignalsManager::removeTemporaryFiles() {
+    while(!tmp_filenames.empty()) {
+      std::string &filename = tmp_filenames.back();
+      if (access(filename.c_str(), F_OK)) {
+        if (remove(filename.c_str()) != 0) {
+          ERROR_PRINT2("Unable to remove filename %s: %s\n",
+                       filename.c_str(), strerror(errno));
+        }
+      }
+      tmp_filenames.pop_back();
+    }
+  }
+  
+  void Config::SignalsManager::signalHandler(int signum) {
+    UNUSED_VARIABLE(signum);
+    Config::signals_manager.removeTemporaryFiles();
+    ERROR_EXIT1(1, "Received signal number %d\n", signum);
+  }
+
 }

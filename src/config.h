@@ -24,11 +24,24 @@
 
 // from APRIL
 #include "smart_ptr.h"
+#include "vector.h"
 
 namespace Arpa2Lira {
   class Config {
     static std::string tmpdir;
     static const std::string TEMPLATE_SUFIX;
+    static AprilUtils::vector<std::string> tmp_filenames;
+    
+    class SignalsManager {
+    public:
+      SignalsManager();
+      ~SignalsManager();
+      void removeTemporaryFiles();
+      static void signalHandler(int signum);
+    };
+    
+    static SignalsManager signals_manager;
+    
   public:
     static int openTemporaryFile(int flags,
                                  AprilUtils::UniquePtr<char []> &result);
