@@ -66,6 +66,14 @@ namespace Arpa2Lira {
   struct Ngram {
     unsigned int word[N];
     float values[M]; // index 0 is transition log-probabilty, index 1 is backoff
+    // for sorting purposes
+    bool operator<(const Ngram<N,M> &other) {
+      for (unsigned int i=0; i<N; ++i) {
+        if (word[i] < other.word[i]) return true;
+        else if (word[i] > other.word[i]) return false;
+      }
+      return false;
+    }
   };
 
   class BinarizeArpa {

@@ -30,6 +30,7 @@ extern "C" {
 
 // from APRIL
 #include "error_print.h"
+#include "qsort.h"
 #include "smart_ptr.h"
 #include "unused_variable.h"
 
@@ -161,8 +162,10 @@ namespace Arpa2Lira {
         p[i].values[BACKOFF_PROB_POS] = arpa_prob(bo);
       }
     }
-
     fprintf(stderr, "\r100.00%%\n");
+    fprintf(stderr, "Sorting ngrams\n");
+    AprilUtils::Sort(p, numNgrams);
+    fprintf(stderr, "Ok\n");
     // work done, free the resources ;)
     if (munmap(filemapped, filesize) == -1) {
       ERROR_EXIT(1, "munmap error\n");
