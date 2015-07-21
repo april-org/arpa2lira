@@ -12,6 +12,7 @@ int main(int argc, char **argv) {
   const char *arpa_filename   = argv[2];
   const char *tmp_dir         = argv[3];
   Config::setTemporaryDirectory(tmp_dir);
+  Config::setNumberOfThreads(4u);
   VocabDictionary voc(vocab_filename);
   BinarizeArpa obj(voc,arpa_filename);
   obj.processArpa();

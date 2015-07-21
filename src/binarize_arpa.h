@@ -25,13 +25,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <cassert>
+#include <future>
 #include <string> // use in the dictionary
+#include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "constString.h"
 #include "error_print.h"
 #include "smart_ptr.h"
-#include "vector.h"
 
 #include "ngram_template.h"
 
@@ -83,10 +85,14 @@ namespace Arpa2Lira {
     VocabDictionary dict;
     static const unsigned int MAX_NGRAM_ORDER=20;
     unsigned int counts[MAX_NGRAM_ORDER];
+    char *mmappedInput;
+    size_t inputFilesize;
     AprilUtils::constString inputFile,workingInput;
     unsigned int ngramOrder;
     AprilUtils::UniquePtr<char []> outputFilenames[MAX_NGRAM_ORDER];
+    std::vector< std::future<bool> > sort_thread_results;
 
+    
     static const float logZero;
     static const float logOne;
     static const float log10;
@@ -100,13 +106,19 @@ namespace Arpa2Lira {
       }
     }
   
+    template<unsigned int N, unsigned int M>
+    static bool sortThreadCall(char *filemapped, size_t filesize,
+                               Ngram<N,M> *p, unsigned int numNgrams);
+    
     void processArpaHeader();
     template<unsigned int N, unsigned int M>
     void extractNgramLevel();
+    void joinThreads();
     
   public:
     BinarizeArpa(VocabDictionary dict,
                  const char *inputFilename);
+    ~BinarizeArpa();
     void processArpa();
   };
 
