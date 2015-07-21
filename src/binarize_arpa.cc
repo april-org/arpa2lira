@@ -18,19 +18,24 @@
  * Place, Suite 330, Boston, MA 02111-1307 USA
  */
 extern "C" {
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>           // mmap() is defined in this header
-#include <fcntl.h>
 #include <unistd.h>
 }
 
+#include <cerrno>
+#include <cstring>
+
 // from APRIL
 #include "error_print.h"
+#include "smart_ptr.h"
 #include "unused_variable.h"
 
 // from Arpa2Lira
 #include "binarize_arpa.h"
+#include "config.h"
 
 using namespace AprilUtils;
 
@@ -83,7 +88,7 @@ namespace Arpa2Lira {
   }
   
   template<unsigned int N, unsigned int M>
-  void BinarizeArpa::extractNgramLevel(const char *outputPrefixFilename) {
+  void BinarizeArpa::extractNgramLevel() {
     // fprintf(stderr,"extractNgramLevel N=%d M=%d\n",N,M);
     // skip header
     char header[20];
@@ -97,18 +102,17 @@ namespace Arpa2Lira {
     unsigned int numNgrams = counts[N-1];
     char  *filemapped;
 
-    char outputFilename[1000];
-    sprintf(outputFilename,"%s-%d.binarized_arpa",outputPrefixFilename,N);
-
     // trying to open file in write mode
     int f_descr;
-    mode_t writemode = S_IRUSR | S_IWUSR | S_IRGRP;
-    if ((f_descr = open(outputFilename, O_RDWR | O_CREAT | O_TRUNC, writemode)) < 0) {
-      ERROR_EXIT1(1, "Error creating file %s\n", outputFilename);
+    AprilUtils::UniquePtr<char> outputFilename;
+    if ((f_descr = Config::openTemporaryFile(O_RDWR | O_CREAT | O_TRUNC, outputFilename)) < 0) {
+      ERROR_EXIT2(1, "Error creating file %s: %s\n",
+                  outputFilename.get(), strerror(errno));
     }
     size_t filesize = sizeof(Ngram<N,M>) * numNgrams;
 
-    fprintf(stderr,"creating %s filename of size %d\n",outputFilename,(int)filesize);
+    fprintf(stderr,"creating %s filename of size %d for level %d\n",
+            outputFilename.get(),(int)filesize,N);
 
     // make file of desired size:
   
@@ -144,7 +148,7 @@ namespace Arpa2Lira {
       p[i].values[NGRAM_PROB_POS] = arpa_prob(trans);
       cs.skip(1);
       for (unsigned int j=0; j<N; ++j) {
-        constString word = cs.extract_token();
+        constString word = cs.extract_token("\r\t\n ");
         cs.skip(1);
         int wordId = dict(word);
         //fprintf(stderr,"%d\n",wordId);
@@ -164,25 +168,19 @@ namespace Arpa2Lira {
       ERROR_EXIT(1, "munmap error\n");
     }
     close(f_descr);
+    // keep the filename in a vector
+    outputFilenames[N-1] = outputFilename;
   }
 
-  // unrolls a loop using templates and processes all ngram levels calling to
-  // extractNgramLevel
-  template<>
-  struct BinarizeArpa::extractNgramLevelUnroller<0u>
-  {
-    extractNgramLevelUnroller(BinarizeArpa &binarizer,
-                              const char *outputPrefixFilename) {
-      UNUSED_VARIABLE(binarizer);
-      UNUSED_VARIABLE(outputPrefixFilename);
-    }
-  };
+  // base case for unroller template, does nothing
+  template<> void BinarizeArpa::extractNgramLevelUnroller<0u>() {
+  }
   
-  void BinarizeArpa::processArpa(const char *outputPrefixFilename) {
+  void BinarizeArpa::processArpa() {
     processArpaHeader();
     // unrolls a loop using templates and processes all ngram levels calling to
     // extractNgramLevel
-    extractNgramLevelUnroller<MAX_NGRAM_ORDER>(*this, outputPrefixFilename);
+    extractNgramLevelUnroller<MAX_NGRAM_ORDER>();
   }
   
 } // namespace Arpa2Lira

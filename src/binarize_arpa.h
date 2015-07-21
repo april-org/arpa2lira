@@ -30,6 +30,8 @@
 
 #include "constString.h"
 #include "error_print.h"
+#include "smart_ptr.h"
+#include "vector.h"
 
 #define NGRAM_PROB_POS   0
 #define BACKOFF_PROB_POS 1
@@ -56,7 +58,7 @@ namespace Arpa2Lira {
       return vocabDictionary.find(std::string(word))->second;
     }
     unsigned int operator()(AprilUtils::constString cs) const {
-      return vocabDictionary.find(std::string((const char *)cs, 0, cs.len()))->second;
+      return vocabDictionary.find(std::string((const char *)cs, cs.len()))->second;
     }
   };
 
@@ -73,26 +75,24 @@ namespace Arpa2Lira {
      * calling to extractNgramLevel
      */
     template<unsigned int COUNT>
-    struct extractNgramLevelUnroller {
-      extractNgramLevelUnroller(BinarizeArpa &binarizer,
-                                const char *outputPrefixFilename) {
-        extractNgramLevelUnroller<COUNT-1>(binarizer, outputPrefixFilename);
-        if (COUNT <= binarizer.ngramOrder) {
-          if (COUNT == binarizer.ngramOrder) {
-            binarizer.extractNgramLevel<COUNT,1u>(outputPrefixFilename);
-          }
-          else {
-            binarizer.extractNgramLevel<COUNT,2u>(outputPrefixFilename);
-          }
+    void extractNgramLevelUnroller() {
+      extractNgramLevelUnroller<COUNT-1>();
+      if (COUNT <= ngramOrder) {
+        if (COUNT == ngramOrder) {
+          extractNgramLevel<COUNT,1u>();
+        }
+        else {
+          extractNgramLevel<COUNT,2u>();
         }
       }
-    };
+    }
     
     VocabDictionary dict;
     static const unsigned int MAX_NGRAM_ORDER=20;
     unsigned int counts[MAX_NGRAM_ORDER];
     AprilUtils::constString inputFile,workingInput;
     unsigned int ngramOrder;
+    AprilUtils::UniquePtr<char> outputFilenames[MAX_NGRAM_ORDER];
 
     static const float logZero;
     static const float logOne;
@@ -109,12 +109,12 @@ namespace Arpa2Lira {
   
     void processArpaHeader();
     template<unsigned int N, unsigned int M>
-    void extractNgramLevel(const char *outputFilename);
+    void extractNgramLevel();
     
   public:
     BinarizeArpa(VocabDictionary dict,
                  const char *inputFilename);
-    void processArpa(const char *outputPrefixFilename);
+    void processArpa();
   };
 
 } // namespace Arpa2Lira
