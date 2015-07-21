@@ -38,10 +38,12 @@ extern "C" {
 #include "config.h"
 
 namespace Arpa2Lira {
+  unsigned int Config::num_threads = 1u;
   std::string Config::tmpdir = "/tmp";
   const std::string Config::TEMPLATE_SUFIX = "/file-a2l-XXXXXX";
   AprilUtils::vector<std::string> Config::tmp_filenames;
   Config::SignalsManager Config::signals_manager;
+  AprilUtils::UniquePtr<ThreadPool> Config::thread_pool(new ThreadPool(1u));
   
   int Config::openTemporaryFile(int flags,
                                 AprilUtils::UniquePtr<char []> &filename) {
@@ -55,6 +57,18 @@ namespace Arpa2Lira {
 
   void Config::setTemporaryDirectory(const char *tmpdir_) {
     tmpdir = tmpdir_;
+  }
+  
+  void Config::setNumberOfThreads(unsigned int n) {
+    if (!Config::thread_pool->empty()) {
+      ERROR_EXIT(1, "Unable to change number of threads\n");
+    }
+    Config::num_threads = n;
+    Config::thread_pool = new ThreadPool(n);
+  }
+  
+  unsigned int Config::getNumberOfThreads() {
+    return Config::num_threads;
   }
 
   /////////////////////////////////////////////////////////////////////////

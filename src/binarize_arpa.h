@@ -25,13 +25,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <cassert>
+#include <future>
 #include <string> // use in the dictionary
+#include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "constString.h"
 #include "error_print.h"
 #include "smart_ptr.h"
-#include "vector.h"
 
 #define NGRAM_PROB_POS   0
 #define BACKOFF_PROB_POS 1
@@ -101,7 +103,9 @@ namespace Arpa2Lira {
     AprilUtils::constString inputFile,workingInput;
     unsigned int ngramOrder;
     AprilUtils::UniquePtr<char []> outputFilenames[MAX_NGRAM_ORDER];
+    std::vector< std::future<bool> > sort_thread_results;
 
+    
     static const float logZero;
     static const float logOne;
     static const float log10;
@@ -115,6 +119,10 @@ namespace Arpa2Lira {
       }
     }
   
+    template<unsigned int N, unsigned int M>
+    static bool sortThreadCall(char *filemapped, size_t filesize,
+                               Ngram<N,M> *p, unsigned int numNgrams);
+    
     void processArpaHeader();
     template<unsigned int N, unsigned int M>
     void extractNgramLevel();
@@ -122,7 +130,9 @@ namespace Arpa2Lira {
   public:
     BinarizeArpa(VocabDictionary dict,
                  const char *inputFilename);
+    ~BinarizeArpa();
     void processArpa();
+    void joinThreads();
   };
 
 } // namespace Arpa2Lira

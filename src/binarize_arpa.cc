@@ -63,6 +63,10 @@ namespace Arpa2Lira {
                                      file_descriptor, 0))  !=(caddr_t)-1);
     workingInput = inputFile = constString(filemapped, filesize);
   }
+  
+  BinarizeArpa::~BinarizeArpa() {
+    joinThreads();
+  }
 
   void BinarizeArpa::processArpaHeader() {
     unsigned int level;
@@ -86,6 +90,19 @@ namespace Arpa2Lira {
     if (ngramOrder > MAX_NGRAM_ORDER) {
       ERROR_EXIT(1, "Maximum ngram order overflow\n");
     }
+  }
+  
+  template<unsigned int N, unsigned int M>
+  bool BinarizeArpa::sortThreadCall(char *filemapped, size_t filesize,
+                                    Ngram<N,M> *p, unsigned int numNgrams) {
+    fprintf(stderr, "Sorting ngrams\n");
+    AprilUtils::Sort(p, numNgrams);
+    fprintf(stderr, "Ok\n");
+    // work done, free the resources ;)
+    if (munmap(filemapped, filesize) == -1) {
+      ERROR_EXIT(1, "munmap error\n");
+    }
+    return true;
   }
   
   template<unsigned int N, unsigned int M>
@@ -116,6 +133,9 @@ namespace Arpa2Lira {
     fprintf(stderr,"creating %s filename of size %d for level %d\n",
             outputFilename.get(),(int)filesize,N);
 
+    // keep the filename in a vector
+    outputFilenames[N-1] = outputFilename;
+    
     // make file of desired size:
   
     // go to the last byte position
@@ -164,16 +184,11 @@ namespace Arpa2Lira {
       }
     }
     fprintf(stderr, "\r100.00%%\n");
-    fprintf(stderr, "Sorting ngrams\n");
-    AprilUtils::Sort(p, numNgrams);
-    fprintf(stderr, "Ok\n");
-    // work done, free the resources ;)
-    if (munmap(filemapped, filesize) == -1) {
-      ERROR_EXIT(1, "munmap error\n");
-    }
     close(f_descr);
-    // keep the filename in a vector
-    outputFilenames[N-1] = outputFilename;
+
+    auto result = Config::thread_pool->enqueue(&sortThreadCall<N,M>, filemapped,
+                                               filesize, p, numNgrams);
+    sort_thread_results.emplace_back(std::move(result));
   }
 
   // base case for unroller template, does nothing
@@ -185,6 +200,13 @@ namespace Arpa2Lira {
     // unrolls a loop using templates and processes all ngram levels calling to
     // extractNgramLevel
     extractNgramLevelUnroller<MAX_NGRAM_ORDER>();
+  }
+
+  void BinarizeArpa::joinThreads() {
+    for (auto && result : sort_thread_results) {
+      fprintf(stderr, "Finished %d\n", result.get());
+    }
+    sort_thread_results.clear();
   }
   
 } // namespace Arpa2Lira

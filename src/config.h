@@ -26,8 +26,12 @@
 #include "smart_ptr.h"
 #include "vector.h"
 
+// from Arpa2Lira
+#include "thread_pool.h"
+
 namespace Arpa2Lira {
   class Config {
+    static unsigned int num_threads;
     static std::string tmpdir;
     static const std::string TEMPLATE_SUFIX;
     /// This is a list of tmp filenames generated using openTemporaryFile()
@@ -46,10 +50,15 @@ namespace Arpa2Lira {
     static SignalsManager signals_manager;
     
   public:
+    /// public property, be careful
+    static AprilUtils::UniquePtr<ThreadPool> thread_pool;
+    
     /// Opens a file and returns its file descriptor and random filename
     static int openTemporaryFile(int flags,
                                  AprilUtils::UniquePtr<char []> &filename);
     static void setTemporaryDirectory(const char *tmpdir_);
+    static void setNumberOfThreads(unsigned int n);
+    static unsigned int getNumberOfThreads();
   };
 } // namespace Arpa2Lira
 
