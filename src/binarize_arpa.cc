@@ -55,7 +55,7 @@ namespace Arpa2Lira {
     // find size of input file
     struct stat statbuf;
     assert(fstat(file_descriptor,&statbuf) >= 0);
-    int filesize = statbuf.st_size;
+    size_t filesize = statbuf.st_size;
     // mmap the input file
     char *filemapped;
     assert((filemapped = (char*)mmap(0, filesize,
@@ -97,7 +97,8 @@ namespace Arpa2Lira {
     constString cs;
     do {
       cs = workingInput.extract_line();
-      fprintf(stderr,"reading '%s'\n",cs.newString());
+      fprintf(stderr,"reading '%s'\n",
+              AprilUtils::UniquePtr<char []>(cs.newString()).get());
     } while (!cs.is_prefix(header));
   
     unsigned int numNgrams = counts[N-1];
