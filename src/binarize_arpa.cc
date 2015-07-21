@@ -160,8 +160,8 @@ namespace Arpa2Lira {
     Ngram<N,M> *p = (Ngram<N,M>*)filemapped;
 
     for (unsigned int i=0; i<numNgrams; ++i) {
-      if (i>0 && i%100==0) {
-        fprintf(stderr,"\r%6.2f%%",i*100.0f/numNgrams);
+      if (i>0 && i%10000==0) {
+        fprintf(stderr,"\r%6.2f%%",i*10000.0f/numNgrams);
       }
       constString cs = workingInput.extract_line();
       //fprintf(stderr,"%s\n",cs.newString());
