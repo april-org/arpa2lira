@@ -55,17 +55,16 @@ namespace Arpa2Lira {
     // find size of input file
     struct stat statbuf;
     assert(fstat(file_descriptor,&statbuf) >= 0);
-    size_t filesize = statbuf.st_size;
+    inputFilesize = statbuf.st_size;
     // mmap the input file
-    char *filemapped;
-    assert((filemapped = (char*)mmap(0, filesize,
-                                     PROT_READ, MAP_SHARED,
-                                     file_descriptor, 0))  !=(caddr_t)-1);
-    workingInput = inputFile = constString(filemapped, filesize);
+    assert((mmappedInput = (char*)mmap(0, inputFilesize,
+                                       PROT_READ, MAP_SHARED,
+                                       file_descriptor, 0))  !=(caddr_t)-1);
+    workingInput = inputFile = constString(mmappedInput, inputFilesize);
+    close(file_descriptor);
   }
   
   BinarizeArpa::~BinarizeArpa() {
-    joinThreads();
   }
 
   void BinarizeArpa::processArpaHeader() {
@@ -95,9 +94,7 @@ namespace Arpa2Lira {
   template<unsigned int N, unsigned int M>
   bool BinarizeArpa::sortThreadCall(char *filemapped, size_t filesize,
                                     Ngram<N,M> *p, unsigned int numNgrams) {
-    fprintf(stderr, "Sorting ngrams\n");
     AprilUtils::Sort(p, numNgrams);
-    fprintf(stderr, "Ok\n");
     // work done, free the resources ;)
     if (munmap(filemapped, filesize) == -1) {
       ERROR_EXIT(1, "munmap error\n");
@@ -114,7 +111,7 @@ namespace Arpa2Lira {
     constString cs;
     do {
       cs = workingInput.extract_line();
-      fprintf(stderr,"reading '%s'\n",
+      fprintf(stderr,"reading %s\n",
               AprilUtils::UniquePtr<char []>(cs.newString()).get());
     } while (!cs.is_prefix(header));
   
@@ -130,8 +127,8 @@ namespace Arpa2Lira {
     }
     size_t filesize = sizeof(Ngram<N,M>) * numNgrams;
 
-    fprintf(stderr,"creating %s filename of size %d for level %d\n",
-            outputFilename.get(),(int)filesize,N);
+    //fprintf(stderr,"creating %s filename of size %d for level %d\n",
+    //outputFilename.get(),(int)filesize,N);
 
     // keep the filename in a vector
     outputFilenames[N-1] = outputFilename;
@@ -154,7 +151,7 @@ namespace Arpa2Lira {
       ERROR_EXIT(1, "mmap error\n");
     }
 
-    fprintf(stderr,"created filename\n");
+    //fprintf(stderr,"created filename\n");
 
     // aqui crear un vector de talla 
     Ngram<N,M> *p = (Ngram<N,M>*)filemapped;
@@ -200,11 +197,16 @@ namespace Arpa2Lira {
     // unrolls a loop using templates and processes all ngram levels calling to
     // extractNgramLevel
     extractNgramLevelUnroller<MAX_NGRAM_ORDER>();
+    joinThreads();
+    // work done, free the resources ;)
+    if (munmap(mmappedInput, inputFilesize) == -1) {
+      ERROR_EXIT(1, "munmap error\n");
+    }    
   }
 
   void BinarizeArpa::joinThreads() {
     for (auto && result : sort_thread_results) {
-      fprintf(stderr, "Finished %d\n", result.get());
+      result.get();
     }
     sort_thread_results.clear();
   }

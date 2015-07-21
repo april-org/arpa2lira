@@ -100,6 +100,8 @@ namespace Arpa2Lira {
     VocabDictionary dict;
     static const unsigned int MAX_NGRAM_ORDER=20;
     unsigned int counts[MAX_NGRAM_ORDER];
+    char *mmappedInput;
+    size_t inputFilesize;
     AprilUtils::constString inputFile,workingInput;
     unsigned int ngramOrder;
     AprilUtils::UniquePtr<char []> outputFilenames[MAX_NGRAM_ORDER];
@@ -126,13 +128,13 @@ namespace Arpa2Lira {
     void processArpaHeader();
     template<unsigned int N, unsigned int M>
     void extractNgramLevel();
+    void joinThreads();
     
   public:
     BinarizeArpa(VocabDictionary dict,
                  const char *inputFilename);
     ~BinarizeArpa();
     void processArpa();
-    void joinThreads();
   };
 
 } // namespace Arpa2Lira
