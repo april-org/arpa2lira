@@ -44,12 +44,12 @@ namespace Arpa2Lira {
   Config::SignalsManager Config::signals_manager;
   
   int Config::openTemporaryFile(int flags,
-                                AprilUtils::UniquePtr<char []> &result) {
-    result.reset(new char[tmpdir.size() + TEMPLATE_SUFIX.size() + 1]);
-    result = strcpy(result.get(), tmpdir.c_str());
-    result = strcat(result.get(), TEMPLATE_SUFIX.c_str());
-    int fd = mkostemp(result.get(), flags);
-    tmp_filenames.push_back(std::string(result.get()));
+                                AprilUtils::UniquePtr<char []> &filename) {
+    filename.reset(new char[tmpdir.size() + TEMPLATE_SUFIX.size() + 1]);
+    filename = strcpy(filename.get(), tmpdir.c_str());
+    filename = strcat(filename.get(), TEMPLATE_SUFIX.c_str());
+    int fd = mkostemp(filename.get(), flags);
+    tmp_filenames.push_back(std::string(filename.get()));
     return fd;
   }
 
@@ -72,8 +72,8 @@ namespace Arpa2Lira {
   void Config::SignalsManager::removeTemporaryFiles() {
     while(!tmp_filenames.empty()) {
       std::string &filename = tmp_filenames.back();
-      if (access(filename.c_str(), F_OK)) {
-        if (remove(filename.c_str()) != 0) {
+      if (access(filename.c_str(), F_OK) == 0) {
+        if (unlink(filename.c_str()) != 0) {
           ERROR_PRINT2("Unable to remove filename %s: %s\n",
                        filename.c_str(), strerror(errno));
         }

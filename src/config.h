@@ -30,8 +30,10 @@ namespace Arpa2Lira {
   class Config {
     static std::string tmpdir;
     static const std::string TEMPLATE_SUFIX;
+    /// This is a list of tmp filenames generated using openTemporaryFile()
     static AprilUtils::vector<std::string> tmp_filenames;
     
+    /// This manager captures SIGINT and others in order to remove all tmp files.
     class SignalsManager {
     public:
       SignalsManager();
@@ -40,11 +42,13 @@ namespace Arpa2Lira {
       static void signalHandler(int signum);
     };
     
+    /// This static instance forces its automatic construction and destruction
     static SignalsManager signals_manager;
     
   public:
+    /// Opens a file and returns its file descriptor and random filename
     static int openTemporaryFile(int flags,
-                                 AprilUtils::UniquePtr<char []> &result);
+                                 AprilUtils::UniquePtr<char []> &filename);
     static void setTemporaryDirectory(const char *tmpdir_);
   };
 } // namespace Arpa2Lira
