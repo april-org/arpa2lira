@@ -6,7 +6,7 @@ OBJS = binarize_arpa.o config.o murmur_hash.o
 all: $(OBJS)
 
 %.o: %.cc
-	$(CC) -c $(CFLAGS) $< -o $@
+	$(CXX) -c $(CFLAGS) $< -o $@
 
 clean:
 	rm -f $(OBJS)
