@@ -105,7 +105,7 @@ namespace Arpa2Lira {
 
     // trying to open file in write mode
     int f_descr;
-    AprilUtils::UniquePtr<char> outputFilename;
+    AprilUtils::UniquePtr<char []> outputFilename;
     if ((f_descr = Config::openTemporaryFile(O_RDWR | O_CREAT | O_TRUNC, outputFilename)) < 0) {
       ERROR_EXIT2(1, "Error creating file %s: %s\n",
                   outputFilename.get(), strerror(errno));
