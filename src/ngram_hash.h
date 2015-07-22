@@ -49,10 +49,11 @@ namespace Arpa2Lira {
     }
   };
 
+  // last argument of template is the equality comparison function, but
+  // we do not specify it because the default_equality_comparison_function is ok
   typedef AprilUtils::hash<NgramForHashing,
                            int,
-                           NFH_hash_fcn,
-                           default_equality_comparison_function> ngram_hash;
+                           NFH_hash_fcn> ngram_hash;
 
 } // namespace Arpa2Lira
 

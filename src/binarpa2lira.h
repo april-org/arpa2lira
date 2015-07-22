@@ -22,6 +22,14 @@
 
 #include "ngram_hash.h"
 
+extern "C" {
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/mman.h>           // mmap() is defined in this header
+#include <unistd.h>
+}
+
 namespace Arpa2Lira {
 
   struct StateInfo {
@@ -40,13 +48,13 @@ namespace Arpa2Lira {
 
   class BinArpa2Lira {
     ngram_hash ngram2state;
+    static const int maxNgramOrder = 20;
     static const int zero_gram = 0;
     static const int final_state = 1;
     int num_states;
     int ngramOrder;
     int begin_cc;
     int end_cc;
-    int maxNgramOrder;
     int counts[maxNgramOrder];
     int mmaped_file_descriptor[maxNgramOrder];
     char *mmaped_file[maxNgramOrder];
