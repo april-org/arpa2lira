@@ -45,10 +45,19 @@ namespace Arpa2Lira {
   const float BinarizeArpa::logZero = 1e-12f;
   const float BinarizeArpa::logOne  = 0.0f;
   const float BinarizeArpa::log10   = 2.302585092994046; // log(10.0);
+  const int   BinarizeArpa::zerogram_st = 0;
+  const int   BinarizeArpa::final_st = 1;
 
   BinarizeArpa::BinarizeArpa(VocabDictionary dict,
-                             const char *inputFilename) : dict(dict) {
+                             const char *inputFilename
+                             int begin_ccue,
+                             int end_ccue) : dict(dict),
+                                           begin_ccue(begin_ccue),
+                                           end_ccue(end_ccue) {
     ngramOrder = 0;
+    num_states = 2; // 0 and 1 are zerogram_st and final_st
+    num_transitions = 0;
+
     // open file
     int file_descriptor = -1;
     assert((file_descriptor = open(inputFilename, O_RDONLY)) >= 0);
@@ -80,10 +89,8 @@ namespace Arpa2Lira {
       assert(level == ++ngramOrder);
       cs.skip("=");
       assert(cs.extract_unsigned_int(&counts[level-1]));
-      // fprintf(stderr,"%d -> %d\n",level,counts[level-1]);
       previous = workingInput;
       cs = workingInput.extract_line();
-      // fprintf(stderr,"Reading '%s'\n",cs.newString());
     }
     workingInput = previous;
     if (ngramOrder > MAX_NGRAM_ORDER) {
@@ -101,23 +108,22 @@ namespace Arpa2Lira {
     }
     return true;
   }
-  
-  template<unsigned int N, unsigned int M>
-  void BinarizeArpa::extractNgramLevel() {
-    // fprintf(stderr,"extractNgramLevel N=%d M=%d\n",N,M);
-    // skip header
-    char header[20];
-    sprintf(header,"\\%d-grams:",N);
-    constString cs;
-    do {
-      cs = workingInput.extract_line();
-      fprintf(stderr,"reading %s\n",
-              AprilUtils::UniquePtr<char []>(cs.newString()).get());
-    } while (!cs.is_prefix(header));
-  
-    unsigned int numNgrams = counts[N-1];
-    char  *filemapped;
 
+  const char* create_mmaped_file(const char *filename, size_t file_size) {
+
+  }
+
+  void BinarizeArpa::create_vectors() {
+    int max_num_states = 3;
+    int max_num_transitions = 0;
+    for (int level=0; level<ngramOrder-1; ++level) {
+      max_num_states += counts[level];
+    }
+    max_num_transitions += max_num_states + counts[ngramOrder-1];
+
+    
+
+    char  *filemapped;
     // trying to open file in write mode
     int f_descr;
     AprilUtils::UniquePtr<char []> outputFilename;
@@ -156,44 +162,122 @@ namespace Arpa2Lira {
     // aqui crear un vector de talla 
     Ngram<N,M> *p = (Ngram<N,M>*)filemapped;
 
+
+  }
+
+  bool BinarizeArpa::exists_state(int *v, int n, int &st) {
+    return ngram_dict.get((const char*)v,sizeof(int)*n,st);
+  }
+
+  int BinarizeArpa::get_state(int *v, int n) {
+    int st;
+    if (n<1)
+      st = zerogram_st;
+    else if (!ngram_dict.get((const char*)v,sizeof(int)*n,st)) {
+      st = num_states++;
+      states[st].fan_out = 0;
+      states[st].backoff_dest = zerogram_st;
+      states[st].best_prob = logZero;
+      states[st].backoff_weight = logZero;
+      ngram_dict.set((const char*)v,sizeof(int)*n,st);
+    }
+    return st;
+  }
+  
+  void BinarizeArpa::extractNgramLevel(int level) {
+    bool notLastLevel = level<ngramOrder;
+    // this is true for the last ngram level:
+    int from = 1;
+    if (notLastLevel) {
+      from = 0;
+    }
+    int dest_size = level-from;
+    int backoff_search_start = from+1;
+    int backoff_size = level-backoff_search_start;
+    // skip header
+    char header[20];
+    sprintf(header,"\\%d-grams:",level);
+    constString cs;
+    do {
+      cs = workingInput.extract_line();
+      // fprintf(stderr,"reading %s\n",
+      //         AprilUtils::UniquePtr<char []>(cs.newString()).get());
+    } while (!cs.is_prefix(header));
+  
+    unsigned int numNgrams = counts[level-1];
+
     for (unsigned int i=0; i<numNgrams; ++i) {
       if (i>0 && i%10000==0) {
         fprintf(stderr,"\r%6.2f%%",i*100.0f/numNgrams);
       }
       constString cs = workingInput.extract_line();
-      //fprintf(stderr,"%s\n",cs.newString());
       float trans,bo;
       cs.extract_float(&trans);
-      p[i].values[NGRAM_PROB_POS] = arpa_prob(trans);
+      trans = arpa_prob(trans);
       cs.skip(1);
       for (unsigned int j=0; j<N; ++j) {
         constString word = cs.extract_token("\r\t\n ");
         cs.skip(1);
         int wordId = dict(word);
-        //fprintf(stderr,"%d\n",wordId);
-        p[i].word[j] = wordId;
+        ngramv[j] = wordId;
       }
-      if (M>1) {
-        if (!cs.extract_float(&bo)) {
+      if (notLastLevel) {
+        if (cs.extract_float(&bo)) {
+          bo = arpa_prob(bo);
+        } else {
           bo = logOne;
         }
-        p[i].values[BACKOFF_PROB_POS] = arpa_prob(bo);
       }
+      // process current ngram
+      int orig_state,dest_state,backoff_dest_state;
+      orig_state = get_state(ngramv,level-1);
+      if (ngramv[N-1] == end_ccue)
+        dest_state = final_st;
+      else {
+        dest_state = get_state(ngramv+from,dest_size);
+      }
+
+      // look for backoff_dest_state
+      backoff_dest_state = zerogram_st;
+      int search_start = backoff_search_start;
+      int search_size  = backoff_size;
+      while (search_size>0 && !exists_state(ngram+search_start,search_size,backoff_dest_state)) {
+        search_start++;
+        search_size--;
+      }
+
+      if (bo > logZero) {
+        states[orig_state].backoff_dest = backoff_dest_state;
+        states[orig_state].backoff_weight = bo; 
+      }
+
+      if (states[orig_state].best_prob < trans)
+        states[orig_state].best_prob = trans;
+      
+      states[orig_state].fan_out++;
+      transitions[num_transitions].origin     = orig_state;
+      transitions[num_transitions].dest       = dest_state;
+      transitions[num_transitions].word       = ngramv[level-1];
+      transitions[num_transitions].trans_prob = trans;
+      num_transitions++;
+
+
     }
     fprintf(stderr, "\r100.00%%\n");
     close(f_descr);
 
-    auto result = Config::thread_pool->enqueue(&sortThreadCall<N,M>, filemapped,
-                                               filesize, p, numNgrams);
-    sort_thread_results.emplace_back(std::move(result));
   }
 
-  // base case for unroller template, does nothing
-  template<> void BinarizeArpa::extractNgramLevelUnroller<0u>() {
-  }
-  
   void BinarizeArpa::processArpa() {
     processArpaHeader();
+
+    if (ngramOrder>1) {
+      ngramvec[0] = begin_ccue;
+      initial_st = get_state(ngramvec,1);
+    } else {
+      initial_st = zerogram_st;
+    }
+
     // unrolls a loop using templates and processes all ngram levels calling to
     // extractNgramLevel
     extractNgramLevelUnroller<MAX_NGRAM_ORDER>();

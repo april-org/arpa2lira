@@ -35,7 +35,7 @@
 #include "error_print.h"
 #include "smart_ptr.h"
 
-#include "ngram_template.h"
+#include "hat_trie_dict.h"
 
 namespace Arpa2Lira {
 
@@ -63,36 +63,36 @@ namespace Arpa2Lira {
     }
   };
 
+  struct StateData {
+    int fan_out;
+    int backoff_dest;
+    float best_prob;
+    float backoff_weight;
+  };
+  struct TransitionData {
+    int origin;
+    int dest;
+    int word;
+    float trans_prob;
+  };
+
+  struct mmaped_file_data {
+    int file_descriptor;
+    size_t file_size;
+    char *file_mapped;
+  }
+
   class BinarizeArpa {
 
-    /**
-     * @brief unrolls a loop using templates and processes all ngram levels
-     * calling to extractNgramLevel
-     */
-    template<unsigned int COUNT>
-    void extractNgramLevelUnroller() {
-      extractNgramLevelUnroller<COUNT-1>();
-      if (COUNT <= ngramOrder) {
-        if (COUNT == ngramOrder) {
-          extractNgramLevel<COUNT,1u>();
-        }
-        else {
-          extractNgramLevel<COUNT,2u>();
-        }
-      }
-    }
-    
     VocabDictionary dict;
     static const unsigned int MAX_NGRAM_ORDER=20;
     unsigned int counts[MAX_NGRAM_ORDER];
+    int ngramvec[MAX_NGRAM_ORDER];
     char *mmappedInput;
     size_t inputFilesize;
     AprilUtils::constString inputFile,workingInput;
     unsigned int ngramOrder;
-    AprilUtils::UniquePtr<char []> outputFilenames[MAX_NGRAM_ORDER];
-    std::vector< std::future<bool> > sort_thread_results;
 
-    
     static const float logZero;
     static const float logOne;
     static const float log10;
@@ -106,18 +106,35 @@ namespace Arpa2Lira {
       }
     }
   
-    template<unsigned int N, unsigned int M>
-    static bool sortThreadCall(char *filemapped, size_t filesize,
-                               Ngram<N,M> *p, unsigned int numNgrams);
+    HAT_TRIE_DICT ngram_dict;
+
+    int begin_ccue;
+    int end_ccue;
+    static const int zerogram_st;
+    static const int final_st;
+    int initial_st;
+    int max_num_states;
+    int num_states;
+    int max_num_transitions;
+    int num_transitions;
+
+    StateData *states;
+    TransitionData *transitions;
+
+    bool exists_state(int *v, int n, int &st);
+    int get_state(int *v, int sz);
     
+    void create_vectors();
     void processArpaHeader();
-    template<unsigned int N, unsigned int M>
-    void extractNgramLevel();
-    void joinThreads();
+
+    void extractNgramLevel(int level);
     
   public:
     BinarizeArpa(VocabDictionary dict,
-                 const char *inputFilename);
+                 const char *inputFilename,
+                 int begin_ccue,
+                 int end_ccue);
+
     ~BinarizeArpa();
     void processArpa();
   };
