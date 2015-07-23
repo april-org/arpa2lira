@@ -133,9 +133,9 @@ namespace Arpa2Lira {
   }
 
   void BinarizeArpa::create_output_vectors() {
-    int max_num_states = 3;
-    int max_num_transitions = 0;
-    for (int level=0; level<ngramOrder-1; ++level) {
+    max_num_states = 3;
+    max_num_transitions = 0;
+    for (int level=0; level<ngramOrder; ++level) {
       max_num_states += counts[level];
     }
     max_num_transitions += max_num_states + counts[ngramOrder-1];
@@ -147,15 +147,25 @@ namespace Arpa2Lira {
   }
 
   bool BinarizeArpa::exists_state(int *v, int n, int &st) {
+    if (n<1) {
+      st = zerogram_st;
+      return true;
+    } else if (v[n-1] == end_ccue) {
+      st = final_st;
+      return true;
+    }
     return ngram_dict.get((const char*)v,sizeof(int)*n,st);
   }
 
   int BinarizeArpa::get_state(int *v, int n) {
-    int st;
+    int st =0;
     if (n<1)
       st = zerogram_st;
+    else if (v[n-1] == end_ccue)
+      st = final_st;
     else if (!ngram_dict.get((const char*)v,sizeof(int)*n,st)) {
       st = num_states++;
+      assert(num_states < max_num_states && " max num states exceeded\n");
       states[st].fan_out = 0;
       states[st].backoff_dest = zerogram_st;
       states[st].best_prob = logZero;
@@ -181,17 +191,18 @@ namespace Arpa2Lira {
     constString cs;
     do {
       cs = workingInput.extract_line();
-      // fprintf(stderr,"reading %s\n",
-      //         AprilUtils::UniquePtr<char []>(cs.newString()).get());
+      fprintf(stderr,"%s reading %s\n", header,
+              AprilUtils::UniquePtr<char []>(cs.newString()).get());
     } while (!cs.is_prefix(header));
   
     int numNgrams = counts[level-1];
 
     for (int i=0; i<numNgrams; ++i) {
-      if (i>0 && i%10000==0) {
+      if (i>0 && i%1000==0) {
         fprintf(stderr,"\r%6.2f%%",i*100.0f/numNgrams);
       }
       constString cs = workingInput.extract_line();
+      //constString cscopy = cs;
       float trans,bo;
       cs.extract_float(&trans);
       trans = arpa_prob(trans);
@@ -211,21 +222,36 @@ namespace Arpa2Lira {
       }
       // process current ngram
       int orig_state,dest_state,backoff_dest_state;
-      orig_state = get_state(ngramvec,level-1);
-      if (ngramvec[level-1] == end_ccue)
-        dest_state = final_st;
-      else {
-        dest_state = get_state(ngramvec+from,dest_size);
-      }
 
-      // look for backoff_dest_state
-      backoff_dest_state = zerogram_st;
-      int search_start = backoff_search_start;
-      int search_size  = backoff_size;
-      while (search_size>0 &&
-             !exists_state(ngramvec+search_start,search_size,backoff_dest_state)) {
-        search_start++;
-        search_size--;
+      // if (!notLastLevel) {
+      //   fprintf(stderr,"%d states, line \"%s\"\n",num_states,
+      //           AprilUtils::UniquePtr<char []>(cscopy.newString()).get());
+      //   for (int x=0; x<level; ++x)
+      //     fprintf(stderr,"%d ",ngramvec[x]);
+      //   fprintf(stderr,"\ndest: ");
+      //   for (int x=0; x<dest_size; ++x)
+      //     fprintf(stderr,"%d ",ngramvec[from+x]);
+      //   fprintf(stderr,"\n");
+      //   fprintf(stderr,"  exist origin %d exist dest %d\n",
+      //           (int)exists_state(ngramvec,level-1,orig_state),
+      //           (int)exists_state(ngramvec+from,dest_size,dest_state));
+      // }
+
+      orig_state = get_state(ngramvec,level-1);
+      dest_state = get_state(ngramvec+from,dest_size);
+
+      if (dest_state == final_st) {
+        bo = logZero;
+      } else {
+        // look for backoff_dest_state
+        backoff_dest_state = zerogram_st;
+        int search_start = backoff_search_start;
+        int search_size  = backoff_size;
+        while (search_size>0 &&
+               !exists_state(ngramvec+search_start,search_size,backoff_dest_state)) {
+          search_start++;
+          search_size--;
+        }
       }
 
       if (bo > logZero) {
@@ -235,7 +261,8 @@ namespace Arpa2Lira {
 
       if (states[orig_state].best_prob < trans)
         states[orig_state].best_prob = trans;
-      
+
+      assert(num_transitions < max_num_transitions && " max num transitions exceeded\n");
       states[orig_state].fan_out++;
       transitions[num_transitions].origin     = orig_state;
       transitions[num_transitions].dest       = dest_state;
@@ -243,6 +270,9 @@ namespace Arpa2Lira {
       transitions[num_transitions].trans_prob = trans;
       num_transitions++;
 
+      // if (!notLastLevel) {
+      //   fprintf(stderr,"%d %d %d %f\n",orig_state,dest_state,ngramvec[level-1],trans);
+      // }
 
     }
     fprintf(stderr, "\r100.00%%\n");
@@ -250,6 +280,11 @@ namespace Arpa2Lira {
 
   void BinarizeArpa::processArpa() {
     processArpaHeader();
+    fprintf(stderr,"arpa header processed\n");
+
+    fprintf(stderr,"creating output vectors\n");
+    create_output_vectors();
+    fprintf(stderr,"output vectors created\n");
 
     if (ngramOrder>1) {
       ngramvec[0] = begin_ccue;
@@ -257,11 +292,14 @@ namespace Arpa2Lira {
     } else {
       initial_st = zerogram_st;
     }
-    create_output_vectors();
-    for (int level=0; level<ngramOrder; ++level) {
+
+    for (int level=1; level<=ngramOrder; ++level) {
       fprintf(stderr,"extractNgramLevel(%d)\n",level);
       extractNgramLevel(level);
     }
+
+    fprintf(stderr,"%d states, %d transitions\n",num_states,num_transitions);
+
   }
 
 } // namespace Arpa2Lira

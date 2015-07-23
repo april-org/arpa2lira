@@ -17,6 +17,7 @@ int main(int argc, char **argv) {
   const char *begin_ccue = "<s>";
   const char *end_ccue = "<s>";
   BinarizeArpa obj(voc,arpa_filename,begin_ccue,end_ccue);
+  fprintf(stderr,"objeto creado\n");
   obj.processArpa();
   return 0;
 }

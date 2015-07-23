@@ -1,5 +1,5 @@
-CFLAGS := $(shell pkg-config --cflags april-ann) -Wall -std=c++11
-LIBS := $(shell pkg-config --libs april-ann hat-trie-0.1) 
+CFLAGS := $(shell pkg-config --cflags april-ann) -Wall -std=c++11 -O3 -lhat-trie
+LIBS := $(shell pkg-config --libs april-ann hat-trie-0.1)  -I /usr/local/include/hat-trie
 
 SRC := ../src
 
