@@ -48,15 +48,16 @@ namespace Arpa2Lira {
   const int   BinarizeArpa::zerogram_st = 0;
   const int   BinarizeArpa::final_st = 1;
 
-  BinarizeArpa::BinarizeArpa(VocabDictionary dict,
-                             const char *inputFilename
-                             int begin_ccue,
-                             int end_ccue) : dict(dict),
-                                           begin_ccue(begin_ccue),
-                                           end_ccue(end_ccue) {
-    ngramOrder = 0;
-    num_states = 2; // 0 and 1 are zerogram_st and final_st
-    num_transitions = 0;
+  BinarizeArpa::BinarizeArpa(VocabDictionary voc,
+                             const char *inputFilename,
+                             const char *begin_ccue,
+                             const char *end_ccue) : 
+    voc(voc),
+    ngramOrder(0),
+    num_states(2), // 0 and 1 are zerogram_st and final_st
+    num_transitions(0),
+    begin_ccue(voc(begin_ccue)),
+    end_ccue(voc(end_ccue)) {
 
     // open file
     int file_descriptor = -1;
@@ -70,14 +71,14 @@ namespace Arpa2Lira {
                                        PROT_READ, MAP_SHARED,
                                        file_descriptor, 0))  !=(caddr_t)-1);
     workingInput = inputFile = constString(mmappedInput, inputFilesize);
-    close(file_descriptor);
+    //close(file_descriptor);
   }
   
   BinarizeArpa::~BinarizeArpa() {
   }
 
   void BinarizeArpa::processArpaHeader() {
-    unsigned int level;
+    int level;
     constString cs,previous;
     do {
       cs = workingInput.extract_line();
@@ -85,10 +86,10 @@ namespace Arpa2Lira {
     previous = workingInput;
     cs = workingInput.extract_line();
     while (cs.skip("ngram")) { // example: ngram 1=103459
-      assert(cs.extract_unsigned_int(&level));
+      assert(cs.extract_int(&level));
       assert(level == ++ngramOrder);
       cs.skip("=");
-      assert(cs.extract_unsigned_int(&counts[level-1]));
+      assert(cs.extract_int(&counts[level-1]));
       previous = workingInput;
       cs = workingInput.extract_line();
     }
@@ -98,22 +99,40 @@ namespace Arpa2Lira {
     }
   }
   
-  template<unsigned int N, unsigned int M>
-  bool BinarizeArpa::sortThreadCall(char *filemapped, size_t filesize,
-                                    Ngram<N,M> *p, unsigned int numNgrams) {
-    AprilUtils::Sort(p, numNgrams);
-    // work done, free the resources ;)
-    if (munmap(filemapped, filesize) == -1) {
+  void BinarizeArpa::create_mmapped_buffer(mmapped_file_data &filedata, size_t filesize) {
+    filedata.file_size = filesize;
+    if ((filedata.file_descriptor = 
+         Config::openTemporaryFile(O_RDWR | O_CREAT | O_TRUNC, filedata.filename)) < 0) {
+      ERROR_EXIT2(1, "Error creating file %s: %s\n",
+                  filedata.filename.get(), strerror(errno));
+    }
+    
+    // make file of desired size:
+    
+    // go to the last byte position
+    if (lseek(filedata.file_descriptor,filedata.file_size-1, SEEK_SET) == -1) {
+      ERROR_EXIT1(1, "lseek error, position %u was tried\n",
+                  (unsigned int)(filedata.file_size-1));
+    }
+    // write dummy byte at the last location
+    if (write(filedata.file_descriptor,"",1) != 1) {
+      ERROR_EXIT(1, "write error\n");
+    }
+    // mmap the output file
+    if ((filedata.file_mmapped = (char*)mmap(0, filedata.file_size,
+                                          PROT_READ|PROT_WRITE, MAP_SHARED,
+                                          filedata.file_descriptor, 0)) == (caddr_t)-1) {
+      ERROR_EXIT(1, "mmap error\n");
+    }
+  }
+  
+  void BinarizeArpa::release_mmapped_buffer(mmapped_file_data &filedata) {
+    if (munmap(filedata.file_mmapped, filedata.file_size) == -1) {
       ERROR_EXIT(1, "munmap error\n");
     }
-    return true;
   }
 
-  const char* create_mmaped_file(const char *filename, size_t file_size) {
-
-  }
-
-  void BinarizeArpa::create_vectors() {
+  void BinarizeArpa::create_output_vectors() {
     int max_num_states = 3;
     int max_num_transitions = 0;
     for (int level=0; level<ngramOrder-1; ++level) {
@@ -121,48 +140,10 @@ namespace Arpa2Lira {
     }
     max_num_transitions += max_num_states + counts[ngramOrder-1];
 
-    
-
-    char  *filemapped;
-    // trying to open file in write mode
-    int f_descr;
-    AprilUtils::UniquePtr<char []> outputFilename;
-    if ((f_descr = Config::openTemporaryFile(O_RDWR | O_CREAT | O_TRUNC, outputFilename)) < 0) {
-      ERROR_EXIT2(1, "Error creating file %s: %s\n",
-                  outputFilename.get(), strerror(errno));
-    }
-    size_t filesize = sizeof(Ngram<N,M>) * numNgrams;
-
-    //fprintf(stderr,"creating %s filename of size %d for level %d\n",
-    //outputFilename.get(),(int)filesize,N);
-
-    // keep the filename in a vector
-    outputFilenames[N-1] = outputFilename;
-    
-    // make file of desired size:
-  
-    // go to the last byte position
-    if (lseek(f_descr,filesize-1, SEEK_SET) == -1) {
-      ERROR_EXIT1(1, "lseek error, position %u was tried\n",
-                  (unsigned int)(filesize-1));
-    }
-    // write dummy byte at the last location
-    if (write(f_descr,"",1) != 1) {
-      ERROR_EXIT(1, "write error\n");
-    }
-    // mmap the output file
-    if ((filemapped = (char*)mmap(0, filesize,
-                                  PROT_READ|PROT_WRITE, MAP_SHARED,
-                                  f_descr, 0)) == (caddr_t)-1) {
-      ERROR_EXIT(1, "mmap error\n");
-    }
-
-    //fprintf(stderr,"created filename\n");
-
-    // aqui crear un vector de talla 
-    Ngram<N,M> *p = (Ngram<N,M>*)filemapped;
-
-
+    create_mmapped_buffer(states_data, sizeof(StateData)*max_num_states);
+    states = (StateData*) states_data.file_mmapped;
+    create_mmapped_buffer(transitions_data, sizeof(TransitionData)*max_num_transitions);
+    transitions = (TransitionData*) transitions_data.file_mmapped;
   }
 
   bool BinarizeArpa::exists_state(int *v, int n, int &st) {
@@ -204,9 +185,9 @@ namespace Arpa2Lira {
       //         AprilUtils::UniquePtr<char []>(cs.newString()).get());
     } while (!cs.is_prefix(header));
   
-    unsigned int numNgrams = counts[level-1];
+    int numNgrams = counts[level-1];
 
-    for (unsigned int i=0; i<numNgrams; ++i) {
+    for (int i=0; i<numNgrams; ++i) {
       if (i>0 && i%10000==0) {
         fprintf(stderr,"\r%6.2f%%",i*100.0f/numNgrams);
       }
@@ -215,11 +196,11 @@ namespace Arpa2Lira {
       cs.extract_float(&trans);
       trans = arpa_prob(trans);
       cs.skip(1);
-      for (unsigned int j=0; j<N; ++j) {
-        constString word = cs.extract_token("\r\t\n ");
+      for (int j=0; j<level; ++j) {
+        constString word = cs.extract_token("\t ");
         cs.skip(1);
-        int wordId = dict(word);
-        ngramv[j] = wordId;
+        int wordId = voc(word);
+        ngramvec[j] = wordId;
       }
       if (notLastLevel) {
         if (cs.extract_float(&bo)) {
@@ -230,18 +211,19 @@ namespace Arpa2Lira {
       }
       // process current ngram
       int orig_state,dest_state,backoff_dest_state;
-      orig_state = get_state(ngramv,level-1);
-      if (ngramv[N-1] == end_ccue)
+      orig_state = get_state(ngramvec,level-1);
+      if (ngramvec[level-1] == end_ccue)
         dest_state = final_st;
       else {
-        dest_state = get_state(ngramv+from,dest_size);
+        dest_state = get_state(ngramvec+from,dest_size);
       }
 
       // look for backoff_dest_state
       backoff_dest_state = zerogram_st;
       int search_start = backoff_search_start;
       int search_size  = backoff_size;
-      while (search_size>0 && !exists_state(ngram+search_start,search_size,backoff_dest_state)) {
+      while (search_size>0 &&
+             !exists_state(ngramvec+search_start,search_size,backoff_dest_state)) {
         search_start++;
         search_size--;
       }
@@ -257,15 +239,13 @@ namespace Arpa2Lira {
       states[orig_state].fan_out++;
       transitions[num_transitions].origin     = orig_state;
       transitions[num_transitions].dest       = dest_state;
-      transitions[num_transitions].word       = ngramv[level-1];
+      transitions[num_transitions].word       = ngramvec[level-1];
       transitions[num_transitions].trans_prob = trans;
       num_transitions++;
 
 
     }
     fprintf(stderr, "\r100.00%%\n");
-    close(f_descr);
-
   }
 
   void BinarizeArpa::processArpa() {
@@ -278,21 +258,7 @@ namespace Arpa2Lira {
       initial_st = zerogram_st;
     }
 
-    // unrolls a loop using templates and processes all ngram levels calling to
-    // extractNgramLevel
-    extractNgramLevelUnroller<MAX_NGRAM_ORDER>();
-    joinThreads();
-    // work done, free the resources ;)
-    if (munmap(mmappedInput, inputFilesize) == -1) {
-      ERROR_EXIT(1, "munmap error\n");
-    }    
+
   }
 
-  void BinarizeArpa::joinThreads() {
-    for (auto && result : sort_thread_results) {
-      result.get();
-    }
-    sort_thread_results.clear();
-  }
-  
 } // namespace Arpa2Lira

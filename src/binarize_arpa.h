@@ -76,22 +76,23 @@ namespace Arpa2Lira {
     float trans_prob;
   };
 
-  struct mmaped_file_data {
+  struct mmapped_file_data {
+    AprilUtils::UniquePtr<char []> filename;
     int file_descriptor;
     size_t file_size;
-    char *file_mapped;
-  }
+    char *file_mmapped;
+  };
 
   class BinarizeArpa {
 
-    VocabDictionary dict;
-    static const unsigned int MAX_NGRAM_ORDER=20;
-    unsigned int counts[MAX_NGRAM_ORDER];
+    VocabDictionary voc;
+    static const int MAX_NGRAM_ORDER=20;
+    int counts[MAX_NGRAM_ORDER];
     int ngramvec[MAX_NGRAM_ORDER];
     char *mmappedInput;
     size_t inputFilesize;
     AprilUtils::constString inputFile,workingInput;
-    unsigned int ngramOrder;
+    int ngramOrder;
 
     static const float logZero;
     static const float logOne;
@@ -108,8 +109,6 @@ namespace Arpa2Lira {
   
     HAT_TRIE_DICT ngram_dict;
 
-    int begin_ccue;
-    int end_ccue;
     static const int zerogram_st;
     static const int final_st;
     int initial_st;
@@ -118,13 +117,23 @@ namespace Arpa2Lira {
     int max_num_transitions;
     int num_transitions;
 
+    mmapped_file_data states_data;
+    mmapped_file_data transitions_data;
+    
     StateData *states;
     TransitionData *transitions;
 
+    int begin_ccue;
+    int end_ccue;
+
     bool exists_state(int *v, int n, int &st);
     int get_state(int *v, int sz);
-    
-    void create_vectors();
+
+    // void read_mmapped_buffer(mmapped_file_data &filedata, const char *filename);
+    void create_mmapped_buffer(mmapped_file_data &filedata, size_t filesize);
+    void release_mmapped_buffer(mmapped_file_data &filedata);
+    void create_output_vectors();
+
     void processArpaHeader();
 
     void extractNgramLevel(int level);
@@ -132,8 +141,8 @@ namespace Arpa2Lira {
   public:
     BinarizeArpa(VocabDictionary dict,
                  const char *inputFilename,
-                 int begin_ccue,
-                 int end_ccue);
+                 const char* begin_ccue,
+                 const char* end_ccue);
 
     ~BinarizeArpa();
     void processArpa();

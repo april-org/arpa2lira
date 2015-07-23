@@ -14,7 +14,9 @@ int main(int argc, char **argv) {
   Config::setTemporaryDirectory(tmp_dir);
   Config::setNumberOfThreads(4u);
   VocabDictionary voc(vocab_filename);
-  BinarizeArpa obj(voc,arpa_filename);
+  const char *begin_ccue = "<s>";
+  const char *end_ccue = "<s>";
+  BinarizeArpa obj(voc,arpa_filename,begin_ccue,end_ccue);
   obj.processArpa();
   return 0;
 }
