@@ -257,8 +257,11 @@ namespace Arpa2Lira {
     } else {
       initial_st = zerogram_st;
     }
-
-
+    create_output_vectors();
+    for (int level=0; level<ngramOrder; ++level) {
+      fprintf(stderr,"extractNgramLevel(%d)\n",level);
+      extractNgramLevel(level);
+    }
   }
 
 } // namespace Arpa2Lira

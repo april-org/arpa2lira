@@ -1,5 +1,5 @@
 CFLAGS := $(shell pkg-config --cflags april-ann) -Wall -std=c++11
-LIBS := $(shell pkg-config --libs april-ann)
+LIBS := $(shell pkg-config --libs april-ann hat-trie-0.1) 
 
 SRC := ../src
 

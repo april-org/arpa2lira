@@ -20,7 +20,7 @@
 #ifndef HAT_TRIE_DICT_H
 #define HAT_TRIE_DICT_H
 
-#include "hat_trie.h"
+#include "hat-trie.h"
 
 class HAT_TRIE_DICT {
   hattrie_t* hat;
