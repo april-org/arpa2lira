@@ -11,7 +11,8 @@
           (flycheck-clang-language-standard . "c++11")
           (flycheck-clang-include-path
            "/usr/include/april-ann"
-           "/usr/include/lua5.2/"
+           "/usr/include/lua5.2"
+           "/usr/local/include/hat-trie"
            )
           )
          )
@@ -20,7 +21,8 @@
             (flycheck-clang-language-standard . "c++11")
             (flycheck-clang-include-path
              "/usr/include/april-ann"
-             "/usr/include/lua5.2/"
+             "/usr/include/lua5.2"
+             "/usr/local/include/hat-trie"
              )
             )
            )
