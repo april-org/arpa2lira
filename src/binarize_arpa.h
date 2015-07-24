@@ -29,6 +29,7 @@
 #include <string> // use in the dictionary
 #include <thread>
 #include <unordered_map>
+#include <map>
 #include <vector>
 
 #include "constString.h"
@@ -42,7 +43,8 @@ namespace Arpa2Lira {
   class VocabDictionary {
     static const unsigned int MAX_WORD_SIZE = 10000u;
     unsigned int vocabSize;
-    std::unordered_map<std::string,unsigned int> vocabDictionary;
+    typedef std::unordered_map<std::string,unsigned int> dictType;
+    dictType vocabDictionary;
   public:
     VocabDictionary(const char *vocabFilename) : vocabSize(0u) {
       FILE *f = fopen(vocabFilename,"r");
@@ -55,11 +57,24 @@ namespace Arpa2Lira {
       }
       fclose(f);
     }
+    unsigned int get_vocab_size() const {
+      return vocabSize;
+    }
     unsigned int operator()(const char *word) const {
       return vocabDictionary.find(std::string(word))->second;
     }
     unsigned int operator()(AprilUtils::constString cs) const {
       return vocabDictionary.find(std::string((const char *)cs, cs.len()))->second;
+    }
+    void writeDictionary(FILE *f) const {
+      std::vector<const char*> vec;
+      vec.resize(vocabSize,"ERROR");
+      for (dictType::const_iterator it = vocabDictionary.begin();
+           it != vocabDictionary.end();
+           ++it)
+        vec[it->second-1] = it->first.c_str();
+      for (unsigned int i=0; i<vocabSize; ++i)
+        fprintf(f,"%s\n",vec[i]);
     }
   };
 
@@ -118,14 +133,21 @@ namespace Arpa2Lira {
   
     HAT_TRIE_DICT ngram_dict;
 
-    static const int zerogram_st;
     static const int final_st;
+    static const int zerogram_st;
+    static const int no_backoff;
     int initial_st;
     int max_num_states;
     int num_states;
+    int num_useful_states;
     int max_num_transitions;
     int num_transitions;
+    int num_useful_transitions;
+    float max_bound;
 
+    int *cod2state; // vector of size num_useful_states
+
+    mmapped_file_data input_arpa_file;
     mmapped_file_data states_data;
     mmapped_file_data transitions_data;
     
@@ -135,31 +157,49 @@ namespace Arpa2Lira {
     int begin_ccue;
     int end_ccue;
 
+    typedef std::map<int,int> int2int_dict_type;
+    int2int_dict_type fan_out_dict; // ordered map for managing fan outs
+    void add_fan_out(int f);
+
     bool exists_state(int *v, int n, int &st);
     int get_state(int *v, int sz);
 
-    // void read_mmapped_buffer(mmapped_file_data &filedata, const char *filename);
+    void read_mmapped_buffer(mmapped_file_data &filedata, const char *filename);
     void create_mmapped_buffer(mmapped_file_data &filedata, size_t filesize);
     void release_mmapped_buffer(mmapped_file_data &filedata);
     void create_output_vectors();
 
     void processArpaHeader();
 
+    void skip_ngram_header(int level);
     void extractNgramLevel(int level);
 
-    void sort_transitions();
     void compute_best_prob();
-    void detect_useless_states();    
+    
+    bool is_useless_state(int st) { // inline
+      return states[st].fan_out==0 && st!=final_st;
+    }
+
+    int renamed_state(int st) {
+      return states[st].cod;
+    }
+    void bypass_backoff_useless_states_and_compute_fanout();
+    void bypass_destination_useless_states();
+    void rename_states();
+    void rename_transitions();
+    void sort_transitions();
+
+    void write_lira_states(FILE *f);
+    void write_lira_transitions(FILE *f);
 
   public:
-    BinarizeArpa(VocabDictionary dict,
+    BinarizeArpa(const char *vocabFilename,
                  const char *inputFilename,
                  const char* begin_ccue,
                  const char* end_ccue);
-
     ~BinarizeArpa();
     void processArpa();
-    void generate_lira();
+    void generate_lira(const char *liraFilename);
   };
 
 } // namespace Arpa2Lira

@@ -42,36 +42,29 @@ using namespace AprilUtils;
 
 namespace Arpa2Lira {
   
-  const float BinarizeArpa::logZero = 1e-12f;
+  const float BinarizeArpa::logZero = -1e12f;
   const float BinarizeArpa::logOne  = 0.0f;
   const float BinarizeArpa::log10   = 2.302585092994046; // log(10.0);
-  const int   BinarizeArpa::zerogram_st = 0;
-  const int   BinarizeArpa::final_st = 1;
+  const int   BinarizeArpa::final_st = 0;
+  const int   BinarizeArpa::zerogram_st = 1;
+  const int   BinarizeArpa::no_backoff = -1;
 
-  BinarizeArpa::BinarizeArpa(VocabDictionary voc,
+  BinarizeArpa::BinarizeArpa(const char *vocabFilename,
                              const char *inputFilename,
                              const char *begin_ccue,
                              const char *end_ccue) : 
-    voc(voc),
+    voc(vocabFilename),
     ngramOrder(0),
     num_states(2), // 0 and 1 are zerogram_st and final_st
     num_transitions(0),
     begin_ccue(voc(begin_ccue)),
     end_ccue(voc(end_ccue)) {
 
-    // open file
-    int file_descriptor = -1;
-    assert((file_descriptor = open(inputFilename, O_RDONLY)) >= 0);
-    // find size of input file
-    struct stat statbuf;
-    assert(fstat(file_descriptor,&statbuf) >= 0);
-    inputFilesize = statbuf.st_size;
-    // mmap the input file
-    assert((mmappedInput = (char*)mmap(0, inputFilesize,
-                                       PROT_READ, MAP_SHARED,
-                                       file_descriptor, 0))  !=(caddr_t)-1);
-    workingInput = inputFile = constString(mmappedInput, inputFilesize);
-    //close(file_descriptor);
+    cod2state = 0;
+
+    read_mmapped_buffer(input_arpa_file,inputFilename);
+    workingInput = inputFile = constString(input_arpa_file.file_mmapped,
+                                           input_arpa_file.file_size);
   }
   
   BinarizeArpa::~BinarizeArpa() {
@@ -125,25 +118,53 @@ namespace Arpa2Lira {
       ERROR_EXIT(1, "mmap error\n");
     }
   }
+
+  void BinarizeArpa::read_mmapped_buffer(mmapped_file_data &filedata, const char *filename) {
+    // open file
+    filedata.file_descriptor = -1;
+    assert((filedata.file_descriptor = open(filename, O_RDONLY)) >= 0);
+    // find size of input file
+    struct stat statbuf;
+    assert(fstat(filedata.file_descriptor,&statbuf) >= 0);
+    filedata.file_size = statbuf.st_size;
+    // mmap the input file
+    assert((filedata.file_mmapped = (char*)mmap(0, filedata.file_size,
+                                                PROT_READ, MAP_SHARED,
+                                                filedata.file_descriptor, 0))  !=(caddr_t)-1);
+  }
   
   void BinarizeArpa::release_mmapped_buffer(mmapped_file_data &filedata) {
     if (munmap(filedata.file_mmapped, filedata.file_size) == -1) {
       ERROR_EXIT(1, "munmap error\n");
     }
+    // da error close(filedata.file_descriptor);
   }
 
   void BinarizeArpa::create_output_vectors() {
-    max_num_states = 3;
+    // determine an upper bound on the number of states and transitions
+    max_num_states = 2;
     max_num_transitions = 0;
     for (int level=0; level<ngramOrder; ++level) {
       max_num_states += counts[level];
     }
     max_num_transitions += max_num_states + counts[ngramOrder-1];
 
+    // actually create two vectors in a mmapped buffer
     create_mmapped_buffer(states_data, sizeof(StateData)*max_num_states);
     states = (StateData*) states_data.file_mmapped;
     create_mmapped_buffer(transitions_data, sizeof(TransitionData)*max_num_transitions);
     transitions = (TransitionData*) transitions_data.file_mmapped;
+
+    // initialize zerogram_st and final_st
+    states[final_st].fan_out = 0;
+    states[final_st].backoff_dest = no_backoff;
+    states[final_st].best_prob = logZero;
+    states[final_st].backoff_weight = logZero;
+    states[zerogram_st].fan_out = 0;
+    states[zerogram_st].backoff_dest = no_backoff;
+    states[zerogram_st].best_prob = logZero;
+    states[zerogram_st].backoff_weight = logZero;
+
   }
 
   bool BinarizeArpa::exists_state(int *v, int n, int &st) {
@@ -165,27 +186,17 @@ namespace Arpa2Lira {
       st = final_st;
     else if (!ngram_dict.get((const char*)v,sizeof(int)*n,st)) {
       st = num_states++;
-      assert(num_states < max_num_states && " max num states exceeded\n");
+      assert(num_states <= max_num_states && " max num states exceeded\n");
       states[st].fan_out = 0;
-      states[st].backoff_dest = zerogram_st;
+      states[st].backoff_dest = no_backoff;
       states[st].best_prob = logZero;
       states[st].backoff_weight = logZero;
       ngram_dict.set((const char*)v,sizeof(int)*n,st);
     }
     return st;
   }
-  
-  void BinarizeArpa::extractNgramLevel(int level) {
-    bool notLastLevel = level<ngramOrder;
-    // this is true for the last ngram level:
-    int from = 1;
-    if (notLastLevel) {
-      from = 0;
-    }
-    int dest_size = level-from;
-    int backoff_search_start = from+1;
-    int backoff_size = level-backoff_search_start;
-    // skip header
+
+  void BinarizeArpa::skip_ngram_header(int level) {
     char header[20];
     sprintf(header,"\\%d-grams:",level);
     constString cs;
@@ -194,7 +205,19 @@ namespace Arpa2Lira {
       fprintf(stderr,"%s reading %s\n", header,
               AprilUtils::UniquePtr<char []>(cs.newString()).get());
     } while (!cs.is_prefix(header));
-  
+  }
+
+  void BinarizeArpa::extractNgramLevel(int level) {
+    bool notLastLevel = level<ngramOrder;
+    int from = 1; // this is true for the last ngram level:
+    if (notLastLevel) {
+      from = 0;
+    }
+    int dest_size = level-from;
+    int backoff_search_start = from+1;
+    int backoff_size = level-backoff_search_start;
+
+    skip_ngram_header(level);
     int numNgrams = counts[level-1];
 
     for (int i=0; i<numNgrams; ++i) {
@@ -202,7 +225,7 @@ namespace Arpa2Lira {
         fprintf(stderr,"\r%6.2f%%",i*100.0f/numNgrams);
       }
       constString cs = workingInput.extract_line();
-      //constString cscopy = cs;
+      constString cscopy = cs;
       float trans,bo;
       cs.extract_float(&trans);
       trans = arpa_prob(trans);
@@ -223,26 +246,17 @@ namespace Arpa2Lira {
       // process current ngram
       int orig_state,dest_state,backoff_dest_state;
 
-      // if (!notLastLevel) {
-      //   fprintf(stderr,"%d states, line \"%s\"\n",num_states,
-      //           AprilUtils::UniquePtr<char []>(cscopy.newString()).get());
-      //   for (int x=0; x<level; ++x)
-      //     fprintf(stderr,"%d ",ngramvec[x]);
-      //   fprintf(stderr,"\ndest: ");
-      //   for (int x=0; x<dest_size; ++x)
-      //     fprintf(stderr,"%d ",ngramvec[from+x]);
-      //   fprintf(stderr,"\n");
-      //   fprintf(stderr,"  exist origin %d exist dest %d\n",
-      //           (int)exists_state(ngramvec,level-1,orig_state),
-      //           (int)exists_state(ngramvec+from,dest_size,dest_state));
-      // }
-
       orig_state = get_state(ngramvec,level-1);
+      assert(orig_state != final_st);
       dest_state = get_state(ngramvec+from,dest_size);
 
-      if (dest_state == final_st) {
-        bo = logZero;
-      } else {
+      if (orig_state == dest_state)
+        fprintf(stderr,"FLAUTA %d %d %f %f %s\n",orig_state,dest_state,trans,bo,
+                cscopy.newString());
+
+      if (dest_state != final_st &&
+          states[dest_state].backoff_dest == no_backoff &&
+          bo > logZero) {
         // look for backoff_dest_state
         backoff_dest_state = zerogram_st;
         int search_start = backoff_search_start;
@@ -252,16 +266,13 @@ namespace Arpa2Lira {
           search_start++;
           search_size--;
         }
-      }
-
-      if (bo > logZero) {
-        states[orig_state].backoff_dest = backoff_dest_state;
-        states[orig_state].backoff_weight = bo; 
+        states[dest_state].backoff_dest = backoff_dest_state;
+        states[dest_state].backoff_weight = bo;
       }
 
       if (states[orig_state].best_prob < trans)
         states[orig_state].best_prob = trans;
-
+      
       assert(num_transitions < max_num_transitions && " max num transitions exceeded\n");
       states[orig_state].fan_out++;
       transitions[num_transitions].origin     = orig_state;
@@ -269,14 +280,209 @@ namespace Arpa2Lira {
       transitions[num_transitions].word       = ngramvec[level-1];
       transitions[num_transitions].trans_prob = trans;
       num_transitions++;
-
-      // if (!notLastLevel) {
-      //   fprintf(stderr,"%d %d %d %f\n",orig_state,dest_state,ngramvec[level-1],trans);
-      // }
-
     }
     fprintf(stderr, "\r100.00%%\n");
   }
+
+  void BinarizeArpa::compute_best_prob() {
+    max_bound = logZero; // global
+    for (int st=num_states-1; st>final_st; --st) {
+      if (!is_useless_state(st)) {
+        int   downst = st;
+        float bound  = states[downst].best_prob;
+        float backoffsum = 0;
+        while (downst != zerogram_st &&
+               states[downst].backoff_dest != no_backoff) {
+          backoffsum += states[downst].backoff_weight;
+          downst = states[downst].backoff_dest;
+          float aux = backoffsum + states[downst].best_prob;
+          if (aux > bound)
+            bound = aux;
+        }
+        if (states[st].best_prob < bound)
+          states[st].best_prob = bound;
+        if (bound > max_bound)
+          max_bound = bound;
+      }
+    }
+  }
+
+  void BinarizeArpa::add_fan_out(int f) {
+    int2int_dict_type::iterator it = fan_out_dict.find(f);
+    if (it == fan_out_dict.end())
+      fan_out_dict[f]=1;
+    else
+      it->second++;
+  }
+  
+  void BinarizeArpa::bypass_backoff_useless_states_and_compute_fanout() {
+    fprintf(stderr,"add fan out final st %d\n",states[final_st].fan_out);
+    add_fan_out(states[final_st].fan_out);
+    num_useful_states = num_states;
+    for (int st=final_st+1; st<num_states; ++st) {
+      if (is_useless_state(st)) {
+        num_useful_states--;
+      } else {
+        add_fan_out(states[st].fan_out); // put here to avoid a novel traversal :S
+        while (states[st].backoff_dest != no_backoff &&
+               is_useless_state(states[st].backoff_dest)) {
+          int back = states[st].backoff_dest;
+          states[st].backoff_weight += states[back].backoff_weight;
+          states[st].backoff_dest = states[back].backoff_dest;
+        }
+      }
+    }
+  }
+  
+  void BinarizeArpa::bypass_destination_useless_states() {
+    num_useful_transitions = 0;
+    for (int trans=0; trans<num_transitions; ++trans) {
+      if (!is_useless_state(transitions[trans].origin)) {
+        num_useful_transitions++;
+        while (is_useless_state(transitions[trans].dest)) {
+          transitions[trans].dest = states[transitions[trans].dest].backoff_dest;
+          transitions[trans].trans_prob += states[transitions[trans].dest].backoff_weight;
+        }
+      }
+    }
+  }
+  
+  void BinarizeArpa::rename_states() {
+    fprintf(stderr,"%d useful states\n",num_useful_states);
+    cod2state = new int[num_useful_states];
+    int aux_cont_states = 0;
+
+    int2int_dict_type first_state_dict; 
+    // traverse fanouts in a sorted way (ordered map)
+    for (int2int_dict_type::iterator it = fan_out_dict.begin();
+         it != fan_out_dict.end();
+         ++it) {
+      first_state_dict[it->first] = aux_cont_states;
+      fprintf(stderr,"%d = %d\n",it->first,aux_cont_states);
+      aux_cont_states += it->second;
+    }
+    assert(aux_cont_states == num_useful_states);
+
+    // unloop final_st as special case
+    int fanout = states[final_st].fan_out;
+    int cod = first_state_dict[fanout]++;
+    states[final_st].cod = cod;
+    cod2state[cod] = final_st;
+    // rest of states
+    for (int st=final_st+1; st<num_states; ++st) {
+      fanout = states[st].fan_out;
+      if (fanout>0) { // useful state
+        cod = first_state_dict[fanout]++;
+        states[st].cod = cod;
+        cod2state[cod] = st;
+      } else { // useless state
+        states[st].cod = num_states+1;
+      }
+    }
+    for (int st=0; st<num_states; ++st) {
+      if (states[st].backoff_dest != no_backoff)
+        states[st].backoff_dest = renamed_state(states[st].backoff_dest);
+    }
+    fprintf(stderr,"LLEGO HASTA AQUI\n");
+  }
+
+  void BinarizeArpa::rename_transitions() {
+    for (int trans=0; trans<num_transitions; ++trans) {
+      transitions[trans].origin = renamed_state(transitions[trans].origin);
+      transitions[trans].dest   = renamed_state(transitions[trans].dest);
+    }
+  }
+    
+  void BinarizeArpa::sort_transitions() {
+    AprilUtils::Sort(transitions, num_transitions);
+  }
+
+  void BinarizeArpa::write_lira_states(FILE *f) {
+    fprintf(f,"# initial state, final state and lowest state\n%d %d %d\n",
+            states[initial_st].cod,
+            states[final_st].cod,
+            states[zerogram_st].cod);
+    fprintf(f,"# state backoff_st 'weight(state->backoff_st)' [max_transition_prob]\n"
+            "# backoff_st == -1 means there is no backoff\n");
+
+    for (int cod=0; cod<num_useful_states; ++cod) {
+      int st = cod2state[cod];
+      if (st < num_states)
+        fprintf(f,"%d %d %f %f\n",
+                cod,
+                states[st].backoff_dest,
+                states[st].backoff_weight,
+                states[st].best_prob);
+    }
+  }
+
+  void BinarizeArpa::write_lira_transitions(FILE *f) {
+    fprintf(f,"# transitions\n# orig dest word prob\n");
+    for (int trans=0; trans<num_useful_transitions; ++trans) {
+        fprintf(f,"%d %d %d %f\n",
+                transitions[trans].origin,
+                transitions[trans].dest,
+                transitions[trans].word,
+                transitions[trans].trans_prob);
+    }
+  }
+
+  void BinarizeArpa::generate_lira(const char *liraFilename) {
+    // compute getBestProb
+    fprintf(stderr,"computing best prob\n");
+    compute_best_prob();
+    fprintf(stderr,"computed!\n");
+
+    // detect states with fanout zero which are not final, they are to
+    // be removed
+    fprintf(stderr,"bypassing states to be removed for backoff purposes\n");
+    bypass_backoff_useless_states_and_compute_fanout();
+    fprintf(stderr,"bypassed!\n");
+
+    fprintf(stderr,"bypassing useless destination states\n");
+    bypass_destination_useless_states();
+    fprintf(stderr,"bypassed!\n");
+
+    fprintf(stderr,"renaming states\n");
+    rename_states();
+    fprintf(stderr,"renamed!\n");
+
+    fprintf(stderr,"renaming transitions\n");
+    rename_transitions();
+    fprintf(stderr,"renamed!\n");
+
+    // sort the vector of transitions first by renamed origin state
+    // and second by word
+    fprintf(stderr,"sorting transitions\n");
+    sort_transitions();
+    fprintf(stderr,"sorted!\n");
+
+    fprintf(stderr,"opening file \"%s\"\n",liraFilename);
+    FILE *f = fopen(liraFilename,"w");
+
+    fprintf(f,"# number of words and words\n%d\n",voc.get_vocab_size());
+    voc.writeDictionary(f);
+    fprintf(stderr,"dictionary written!\n");
+    fprintf(f,"# max order of n-gram\n%d\n",ngramOrder);
+    fprintf(f,"# number of states\n%d\n",num_useful_states);
+    fprintf(f,"# number of transitions\n%d\n",num_useful_transitions);
+    fprintf(f,"# bound max trans prob\n%f\n",max_bound);
+    
+    int different_fan_outs = fan_out_dict.size();
+    fprintf(f,"# how many different number of transitions\n%d\n"
+            "# \"x y\" means x states have y transitions\n",
+            different_fan_outs);
+    for (int2int_dict_type::iterator it = fan_out_dict.begin();
+         it != fan_out_dict.end();
+         ++it) {
+      fprintf(f,"%d %d\n",it->second,it->first);
+    }
+
+    write_lira_states(f);
+    write_lira_transitions(f);
+
+    fclose(f);
+  }    
 
   void BinarizeArpa::processArpa() {
     processArpaHeader();
@@ -292,226 +498,15 @@ namespace Arpa2Lira {
     } else {
       initial_st = zerogram_st;
     }
-
     for (int level=1; level<=ngramOrder; ++level) {
       fprintf(stderr,"extractNgramLevel(%d)\n",level);
       extractNgramLevel(level);
     }
-
     fprintf(stderr,"%d states, %d transitions\n",num_states,num_transitions);
 
+    fprintf(stderr,"releasing arpa file\n");
+    release_mmapped_buffer(input_arpa_file);
+    fprintf(stderr,"released\n");
   }
-
-  void BinarizeArpa::sort_transitions() {
-    AprilUtils::Sort(transitions, num_transitions);
-  }
-
-  void BinarizeArpa::compute_best_prob() {
-    for (int st=num_states-1; st>final_st; --st) {
-      int   downst = st;
-      float bound  = states[downst].best_prob;
-      float backoffsum = 0;
-      while (st != zerogram_st &&
-             states[downst].backoff_weight > logZero) {
-        backoffsum += states[downst].backoff_weight;
-        downst = states[downst].backoff_dest;
-        float aux = backoffsum + states[downst].best_prob;
-        if (aux > bound)
-          bound = aux;
-      }
-      if (states[st].best_prob < bound)
-        states[st].best_prob = bound;
-    }
-  }
-
-  void BinarizeArpa::detect_useless_states() {
-    int count=0;
-    for (int st=final_st+1; st<num_states; ++st) {
-      if (states[st].fan_out == 0)
-        count++;
-    }
-    printf("there are %d useless states\n",count);
-  }
-
-  void BinarizeArpa::generate_lira() {
-
-    // sorting transitions
-    fprintf(stderr,"sorting transitions\n");
-    sort_transitions();
-    fprintf(stderr,"sorted!\n");
-
-    
-    // compute getBestProb
-    fprintf(stderr,"computing best prob\n");
-    compute_best_prob();
-    fprintf(stderr,"computed!\n");
-
-
-    // detect states with fanout zero which are not final, they are to
-    // be removed
-    fprintf(stderr,"detecting states to be removed\n");
-    detect_useless_states();
-    fprintf(stderr,"detected!\n");
-
-
-    // esto en el arpa2lira lo que se hace es       a_eliminar[st] = true
-
-    // check if an state descend (by means of backoff) to a state to be removed
-    // local it = state2transitions:beginIt()
-    // local end_it = state2transitions:endIt()
-    // while it:notEqual(end_it) do
-    //   local st = it:getState()
-    //   while backoffs[st] and a_eliminar[backoffs[st][1]] do
-    //     backoffs[st][2] = backoffs[st][2] + backoffs[backoffs[st][1]][2]
-    //     backoffs[st][1] = backoffs[backoffs[st][1]][1]
-    //   end
-    //   it:next()
-    // end
-    
-    // sort the vector of transitions by the word
-
-    // -- eliminar estados cambiando las transiciones que llegan a ellos
-    // --for st,trans in pairs(state2transitions) do
-    // local it = state2transitions:beginIt()
-    // local end_it = state2transitions:endIt()
-    // while it:notEqual(end_it) do
-    //   local st = it:getState()
-    //   local trans = it:getTransitions()
-    //   local maxprob
-    //   --for i = 1,#trans,3 do
-    //   for i=1,trans:size() do
-    //     --local dest,prob = trans[i],trans[i+2]
-    //     local dest,word,prob = trans:get(i)
-    //     while a_eliminar[dest] do
-    //       local info = backoffs[dest] -- info es destino,bow
-    //       dest = info[1]
-    //       prob = prob+info[2]
-    //     end
-    //     --trans[i],trans[i+2] = dest,prob
-    //     trans:set(i,dest,word,prob)
-    //   end
-    //   -- ordenamos las transiciones por el id de la palabra
-    //   --shellsort(trans)
-    //   trans:sortByWordId()
-    //   it:next()
-    // end
-
-    // -- eliminar efectivamente los "estados a eliminar"
-    // for st,trans in pairs(a_eliminar) do
-    //   backoffs[st]          = nil
-    //   --state2transitions[st] = nil
-    //   state2transitions:erase(st)
-    // end
-
-    // collectgarbage("collect")
-    
-    // -- ordenar los estados por numero de transiciones que salen de ellos
-    // local fan_out_list    = {} -- numero de transiciones que aparecen
-    // local num_transitions = 0
-    // local num_states      = 0
-    // --for st,trans in pairs(state2transitions) do
-    // local it = state2transitions:beginIt()
-    // local end_it = state2transitions:endIt()
-    // while it:notEqual(end_it) do
-    //   local st = it:getState()
-    //   local trans = it:getTransitions()
-    //   --local fanout = #trans/3 -- fan out del estado st
-    //   local fanout = trans:size()
-    //   num_states = num_states + 1 -- contamos estados
-    //   num_transitions = num_transitions + fanout -- contamos todas las transiciones
-    //   if fanout2states[fanout] == nil then -- lista de estados con un fan out dado
-    //     fanout2states[fanout] = {}
-    //     table.insert(fan_out_list,fanout) -- lista de fan outs aparecidos
-    //   end
-    //   table.insert(fanout2states[fanout],st)
-    //   it:next()
-    // end
-    
-    // ----------------------------------------------------------------------
-    // -- empezamos a escribir el formato lira
-    // ----------------------------------------------------------------------
-    
-    // local tabla_vocabulario = vocabulary:getWordVocabulary()
-    // fprintf(output_file,"# number of words and words\n%d\n%s\n",#tabla_vocabulario,
-    //         table.concat(tabla_vocabulario,"\n"))
-    // fprintf(output_file,
-    //         "# max order of n-gram\n%d\n# number of states\n%d\n# number of transitions\n%d\n"..
-    //           "# bound max trans prob\n%f\n",
-    //         n,num_states,num_transitions,bestProb)
-    
-    // ----------------------------------------------------------------------
-    // -- darle un numero a cada estado
-    // ----------------------------------------------------------------------
-    // local state2cod = {} -- state_name   -> state_number
-    // local cod2state = {} -- state_number -> state_name
-    // local num_state = -1
-    // fprintf(output_file,"# how many different number of transitions\n%d\n" ..
-    //         "# \"x y\" means x states have y transitions\n",
-    //       #fan_out_list)
-    // -- recorremos los estados ORDENADOS por numero de transiciones de
-    // -- salida
-    // table.sort(fan_out_list)
-    // for i,fan_out in ipairs(fan_out_list) do
-    //   -- codificamos todos los estados con fan_out transiciones
-    //   fprintf(output_file,"%d %d\n",
-    //           #fanout2states[fan_out],fan_out)
-    //   for k,st in ipairs(fanout2states[fan_out]) do
-    //     num_state            = num_state+1
-    //     state2cod[st]        = num_state
-    //     cod2state[num_state] = st
-    //   end
-    // end
-    
-    // fprintf(output_file,"# initial state, final state and lowest state\n%d %d %d\n",
-    //         state2cod[initial_state],state2cod[final_state],state2cod[lowest_state])
-    
-    // -- para cada estado imprimimos su estado backoff destino, la
-    // -- probabilidad de bajar y su cota superior de transitar
-    // fprintf(output_file,"# state backoff_st 'weight(state->backoff_st)' [max_transition_prob]\n")
-    // fprintf(output_file,"# backoff_st == -1 means there is no backoff\n")
-    // -- stcod es el codigo definitivo que sale en lira, statename es el
-    // -- codigo que le asigno el trie
-    // for stcod=0,num_state do
-    //   local statename = cod2state[stcod]
-    //   local s         = string.format("%d",stcod)
-    //   local info      = backoffs[statename]
-    //   if info then
-    //     if state2cod[info[1]] == nil then
-    //       error(string.format("se intenta bajar por backoff al estado %s que no existe",
-    //       		    info[1]))
-    //     end
-    //     s = s .. string.format(" %d %f",state2cod[info[1]],info[2])
-    //   else
-    //     s = s .. " -1 -1" -- valores especiales para indicar que no hay backoff
-    //   end
-    //   if upperBoundBestProb[statename] then
-    //     s = s .. string.format(" %f", upperBoundBestProb[statename])
-    //   end
-    //   fprintf(output_file,"%s\n",s)
-    //   if math.modf(stcod,100000) == 0 then collectgarbage("collect") end
-    // end
-    
-    // -- las transiciones
-    // fprintf(output_file,"# transitions\n# orig dest word prob\n")
-    // for stcod=0,num_state do
-    //   local statename = cod2state[stcod]
-    //   --local trans = state2transitions[statename]
-    //   local trans = state2transitions:getTransitions(statename)
-    //   --for i = 1,#trans,3 do
-    //   for i=1,trans:size() do
-    //     local dest,word,prob = trans:get(i) --trans[i],trans[i+1],trans[i+2]
-    //     if verbosity > 1 then
-    //       fprintf(output_file,"# %s -> %s %s %g\n",statename,dest,word,prob)
-    //     end
-    //     fprintf(output_file,"%d %d %d %g\n",
-    //             stcod,state2cod[dest],word,prob)
-    //   end
-    //   if math.modf(stcod,10000) == 0 then collectgarbage("collect") end
-    // end
-    
-    // output_file:close()
-  }    
-
-
 
 } // namespace Arpa2Lira
