@@ -302,4 +302,216 @@ namespace Arpa2Lira {
 
   }
 
+  void BinarizeArpa::sort_transitions() {
+    AprilUtils::Sort(transitions, num_transitions);
+  }
+
+  void BinarizeArpa::compute_best_prob() {
+    for (int st=num_states-1; st>final_st; --st) {
+      int   downst = st;
+      float bound  = states[downst].best_prob;
+      float backoffsum = 0;
+      while (st != zerogram_st &&
+             states[downst].backoff_weight > logZero) {
+        backoffsum += states[downst].backoff_weight;
+        downst = states[downst].backoff_dest;
+        float aux = backoffsum + states[downst].best_prob;
+        if (aux > bound)
+          bound = aux;
+      }
+      if (states[st].best_prob < bound)
+        states[st].best_prob = bound;
+    }
+  }
+
+  void BinarizeArpa::detect_useless_states() {
+    int count=0;
+    for (int st=final_st+1; st<num_states; ++st) {
+      if (states[st].fan_out == 0)
+        count++;
+    }
+    printf("there are %d useless states\n",count);
+  }
+
+  void BinarizeArpa::generate_lira() {
+
+    // sorting transitions
+    fprintf(stderr,"sorting transitions\n");
+    sort_transitions();
+    fprintf(stderr,"sorted!\n");
+
+    
+    // compute getBestProb
+    fprintf(stderr,"computing best prob\n");
+    compute_best_prob();
+    fprintf(stderr,"computed!\n");
+
+
+    // detect states with fanout zero which are not final, they are to
+    // be removed
+    fprintf(stderr,"detecting states to be removed\n");
+    detect_useless_states();
+    fprintf(stderr,"detected!\n");
+
+
+    // esto en el arpa2lira lo que se hace es       a_eliminar[st] = true
+
+    // check if an state descend (by means of backoff) to a state to be removed
+    // local it = state2transitions:beginIt()
+    // local end_it = state2transitions:endIt()
+    // while it:notEqual(end_it) do
+    //   local st = it:getState()
+    //   while backoffs[st] and a_eliminar[backoffs[st][1]] do
+    //     backoffs[st][2] = backoffs[st][2] + backoffs[backoffs[st][1]][2]
+    //     backoffs[st][1] = backoffs[backoffs[st][1]][1]
+    //   end
+    //   it:next()
+    // end
+    
+    // sort the vector of transitions by the word
+
+    // -- eliminar estados cambiando las transiciones que llegan a ellos
+    // --for st,trans in pairs(state2transitions) do
+    // local it = state2transitions:beginIt()
+    // local end_it = state2transitions:endIt()
+    // while it:notEqual(end_it) do
+    //   local st = it:getState()
+    //   local trans = it:getTransitions()
+    //   local maxprob
+    //   --for i = 1,#trans,3 do
+    //   for i=1,trans:size() do
+    //     --local dest,prob = trans[i],trans[i+2]
+    //     local dest,word,prob = trans:get(i)
+    //     while a_eliminar[dest] do
+    //       local info = backoffs[dest] -- info es destino,bow
+    //       dest = info[1]
+    //       prob = prob+info[2]
+    //     end
+    //     --trans[i],trans[i+2] = dest,prob
+    //     trans:set(i,dest,word,prob)
+    //   end
+    //   -- ordenamos las transiciones por el id de la palabra
+    //   --shellsort(trans)
+    //   trans:sortByWordId()
+    //   it:next()
+    // end
+
+    // -- eliminar efectivamente los "estados a eliminar"
+    // for st,trans in pairs(a_eliminar) do
+    //   backoffs[st]          = nil
+    //   --state2transitions[st] = nil
+    //   state2transitions:erase(st)
+    // end
+
+    // collectgarbage("collect")
+    
+    // -- ordenar los estados por numero de transiciones que salen de ellos
+    // local fan_out_list    = {} -- numero de transiciones que aparecen
+    // local num_transitions = 0
+    // local num_states      = 0
+    // --for st,trans in pairs(state2transitions) do
+    // local it = state2transitions:beginIt()
+    // local end_it = state2transitions:endIt()
+    // while it:notEqual(end_it) do
+    //   local st = it:getState()
+    //   local trans = it:getTransitions()
+    //   --local fanout = #trans/3 -- fan out del estado st
+    //   local fanout = trans:size()
+    //   num_states = num_states + 1 -- contamos estados
+    //   num_transitions = num_transitions + fanout -- contamos todas las transiciones
+    //   if fanout2states[fanout] == nil then -- lista de estados con un fan out dado
+    //     fanout2states[fanout] = {}
+    //     table.insert(fan_out_list,fanout) -- lista de fan outs aparecidos
+    //   end
+    //   table.insert(fanout2states[fanout],st)
+    //   it:next()
+    // end
+    
+    // ----------------------------------------------------------------------
+    // -- empezamos a escribir el formato lira
+    // ----------------------------------------------------------------------
+    
+    // local tabla_vocabulario = vocabulary:getWordVocabulary()
+    // fprintf(output_file,"# number of words and words\n%d\n%s\n",#tabla_vocabulario,
+    //         table.concat(tabla_vocabulario,"\n"))
+    // fprintf(output_file,
+    //         "# max order of n-gram\n%d\n# number of states\n%d\n# number of transitions\n%d\n"..
+    //           "# bound max trans prob\n%f\n",
+    //         n,num_states,num_transitions,bestProb)
+    
+    // ----------------------------------------------------------------------
+    // -- darle un numero a cada estado
+    // ----------------------------------------------------------------------
+    // local state2cod = {} -- state_name   -> state_number
+    // local cod2state = {} -- state_number -> state_name
+    // local num_state = -1
+    // fprintf(output_file,"# how many different number of transitions\n%d\n" ..
+    //         "# \"x y\" means x states have y transitions\n",
+    //       #fan_out_list)
+    // -- recorremos los estados ORDENADOS por numero de transiciones de
+    // -- salida
+    // table.sort(fan_out_list)
+    // for i,fan_out in ipairs(fan_out_list) do
+    //   -- codificamos todos los estados con fan_out transiciones
+    //   fprintf(output_file,"%d %d\n",
+    //           #fanout2states[fan_out],fan_out)
+    //   for k,st in ipairs(fanout2states[fan_out]) do
+    //     num_state            = num_state+1
+    //     state2cod[st]        = num_state
+    //     cod2state[num_state] = st
+    //   end
+    // end
+    
+    // fprintf(output_file,"# initial state, final state and lowest state\n%d %d %d\n",
+    //         state2cod[initial_state],state2cod[final_state],state2cod[lowest_state])
+    
+    // -- para cada estado imprimimos su estado backoff destino, la
+    // -- probabilidad de bajar y su cota superior de transitar
+    // fprintf(output_file,"# state backoff_st 'weight(state->backoff_st)' [max_transition_prob]\n")
+    // fprintf(output_file,"# backoff_st == -1 means there is no backoff\n")
+    // -- stcod es el codigo definitivo que sale en lira, statename es el
+    // -- codigo que le asigno el trie
+    // for stcod=0,num_state do
+    //   local statename = cod2state[stcod]
+    //   local s         = string.format("%d",stcod)
+    //   local info      = backoffs[statename]
+    //   if info then
+    //     if state2cod[info[1]] == nil then
+    //       error(string.format("se intenta bajar por backoff al estado %s que no existe",
+    //       		    info[1]))
+    //     end
+    //     s = s .. string.format(" %d %f",state2cod[info[1]],info[2])
+    //   else
+    //     s = s .. " -1 -1" -- valores especiales para indicar que no hay backoff
+    //   end
+    //   if upperBoundBestProb[statename] then
+    //     s = s .. string.format(" %f", upperBoundBestProb[statename])
+    //   end
+    //   fprintf(output_file,"%s\n",s)
+    //   if math.modf(stcod,100000) == 0 then collectgarbage("collect") end
+    // end
+    
+    // -- las transiciones
+    // fprintf(output_file,"# transitions\n# orig dest word prob\n")
+    // for stcod=0,num_state do
+    //   local statename = cod2state[stcod]
+    //   --local trans = state2transitions[statename]
+    //   local trans = state2transitions:getTransitions(statename)
+    //   --for i = 1,#trans,3 do
+    //   for i=1,trans:size() do
+    //     local dest,word,prob = trans:get(i) --trans[i],trans[i+1],trans[i+2]
+    //     if verbosity > 1 then
+    //       fprintf(output_file,"# %s -> %s %s %g\n",statename,dest,word,prob)
+    //     end
+    //     fprintf(output_file,"%d %d %d %g\n",
+    //             stcod,state2cod[dest],word,prob)
+    //   end
+    //   if math.modf(stcod,10000) == 0 then collectgarbage("collect") end
+    // end
+    
+    // output_file:close()
+  }    
+
+
+
 } // namespace Arpa2Lira

@@ -19,5 +19,6 @@ int main(int argc, char **argv) {
   BinarizeArpa obj(voc,arpa_filename,begin_ccue,end_ccue);
   fprintf(stderr,"objeto creado\n");
   obj.processArpa();
+  obj.generate_lira();
   return 0;
 }

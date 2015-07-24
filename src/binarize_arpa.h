@@ -66,14 +66,23 @@ namespace Arpa2Lira {
   struct StateData {
     int fan_out;
     int backoff_dest;
+    int cod; // the final code in lira format
     float best_prob;
     float backoff_weight;
   };
+
   struct TransitionData {
     int origin;
     int dest;
     int word;
     float trans_prob;
+    
+    // for sorting purposes
+    bool operator<(const TransitionData &other) const {
+      if (origin < other.origin) return true;
+      if (origin > other.origin) return false;
+      return word < other.word;
+    }
   };
 
   struct mmapped_file_data {
@@ -137,7 +146,11 @@ namespace Arpa2Lira {
     void processArpaHeader();
 
     void extractNgramLevel(int level);
-    
+
+    void sort_transitions();
+    void compute_best_prob();
+    void detect_useless_states();    
+
   public:
     BinarizeArpa(VocabDictionary dict,
                  const char *inputFilename,
@@ -146,6 +159,7 @@ namespace Arpa2Lira {
 
     ~BinarizeArpa();
     void processArpa();
+    void generate_lira();
   };
 
 } // namespace Arpa2Lira
