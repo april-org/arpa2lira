@@ -36,6 +36,8 @@ extern "C" {
 #include "config.h"
 
 using namespace AprilUtils;
+using namespace AprilIO;
+using namespace GZIO;
 
 namespace Arpa2Lira {
   
@@ -46,6 +48,22 @@ namespace Arpa2Lira {
   const int   BinarizeArpa::zerogram_st = 1;
   const int   BinarizeArpa::no_backoff = -1;
 
+  ///////////////////////////////////////////////////////////////////////////
+  
+  StreamInterface *openFile(const char *filename, const char *mode) {
+    size_t len = strlen(filename);
+    StreamInterface *f;
+    if (strcmp(filename + len - 3, ".gz") == 0) {
+      f = new GZFileStream(filename, mode);
+    }
+    else {
+      f = new FileStream(filename, mode);
+    }
+    return f;
+  }
+  
+  ///////////////////////////////////////////////////////////////////////////
+  
   BinarizeArpa::BinarizeArpa(const char *vocabFilename,
                              const char *inputFilename,
                              const char *begin_ccue,
@@ -89,34 +107,20 @@ namespace Arpa2Lira {
     }
   }
   
-  void BinarizeArpa::create_mmapped_buffer(mmapped_file_data &filedata, size_t filesize) {
-    filedata.file_size = filesize;
-    if ((filedata.file_descriptor = 
-         Config::openTemporaryFile(O_RDWR | O_CREAT | O_TRUNC, filedata.filename)) < 0) {
-      ERROR_EXIT2(1, "Error creating file %s: %s\n",
-                  filedata.filename.get(), strerror(errno));
-    }
-    
-    // make file of desired size:
-    
-    // go to the last byte position
-    if (lseek(filedata.file_descriptor,filedata.file_size-1, SEEK_SET) == -1) {
-      ERROR_EXIT1(1, "lseek error, position %u was tried\n",
-                  (unsigned int)(filedata.file_size-1));
-    }
-    // write dummy byte at the last location
-    if (write(filedata.file_descriptor,"",1) != 1) {
-      ERROR_EXIT(1, "write error\n");
-    }
-    // mmap the output file
-    if ((filedata.file_mmapped = (char*)mmap(0, filedata.file_size,
-                                          PROT_READ|PROT_WRITE, MAP_SHARED,
-                                          filedata.file_descriptor, 0)) == (caddr_t)-1) {
-      ERROR_EXIT(1, "mmap error\n");
+  void BinarizeArpa::create_mmapped_buffer(mmapped_file_data &filedata,
+                                           size_t filesize) {
+    filedata.file_descriptor = -1;
+    filedata.file_size       = filesize;
+    if ((filedata.file_mmapped = (char*)mmap(NULL, filesize,
+                                             PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED,
+                                             -1, 0)) == MAP_FAILED) {
+      ERROR_EXIT2(1, "Error creating anonymous mmap of size %lu: %s\n",
+                  filesize, strerror(errno));
     }
   }
 
-  void BinarizeArpa::read_mmapped_buffer(mmapped_file_data &filedata, const char *filename) {
+  void BinarizeArpa::read_mmapped_buffer(mmapped_file_data &filedata,
+                                         const char *filename) {
     // open file
     filedata.file_descriptor = -1;
     assert((filedata.file_descriptor = open(filename, O_RDONLY)) >= 0);
@@ -125,16 +129,21 @@ namespace Arpa2Lira {
     assert(fstat(filedata.file_descriptor,&statbuf) >= 0);
     filedata.file_size = statbuf.st_size;
     // mmap the input file
-    assert((filedata.file_mmapped = (char*)mmap(0, filedata.file_size,
-                                                PROT_READ, MAP_SHARED,
-                                                filedata.file_descriptor, 0))  !=(caddr_t)-1);
+    if ((filedata.file_mmapped = (char*)mmap(NULL, filedata.file_size,
+                                             PROT_READ, MAP_SHARED,
+                                             filedata.file_descriptor, 0)) == MAP_FAILED) {
+      ERROR_EXIT2(1, "Error reading mmapped file %s: %s\n",
+                  filename, strerror(errno));
+    }
   }
   
   void BinarizeArpa::release_mmapped_buffer(mmapped_file_data &filedata) {
+    if (filedata.file_descriptor != -1) {
+      close(filedata.file_descriptor);
+    }
     if (munmap(filedata.file_mmapped, filedata.file_size) == -1) {
       ERROR_EXIT(1, "munmap error\n");
     }
-    // da error close(filedata.file_descriptor);
   }
 
   void BinarizeArpa::create_output_vectors() {
@@ -383,33 +392,33 @@ namespace Arpa2Lira {
     AprilUtils::Sort(transitions, num_transitions);
   }
 
-  void BinarizeArpa::write_lira_states(FILE *f) {
-    fprintf(f,"# initial state, final state and lowest state\n%d %d %d\n",
-            states[initial_st].cod,
-            states[final_st].cod,
-            states[zerogram_st].cod);
-    fprintf(f,"# state backoff_st 'weight(state->backoff_st)' [max_transition_prob]\n"
-            "# backoff_st == -1 means there is no backoff\n");
+  void BinarizeArpa::write_lira_states(StreamInterface *f) {
+    f->printf("# initial state, final state and lowest state\n%d %d %d\n",
+              states[initial_st].cod,
+              states[final_st].cod,
+              states[zerogram_st].cod);
+    f->printf("# state backoff_st 'weight(state->backoff_st)' [max_transition_prob]\n"
+              "# backoff_st == -1 means there is no backoff\n");
 
     for (int cod=0; cod<num_useful_states; ++cod) {
       int st = cod2state[cod];
       if (st < num_states)
-        fprintf(f,"%d %d %g %g\n",
-                cod,
-                states[st].backoff_dest,
-                states[st].backoff_weight,
-                states[st].best_prob);
+        f->printf("%d %d %g %g\n",
+                  cod,
+                  states[st].backoff_dest,
+                  states[st].backoff_weight,
+                  states[st].best_prob);
     }
   }
 
-  void BinarizeArpa::write_lira_transitions(FILE *f) {
-    fprintf(f,"# transitions\n# orig dest word prob\n");
+  void BinarizeArpa::write_lira_transitions(StreamInterface *f) {
+    f->printf("# transitions\n# orig dest word prob\n");
     for (int trans=0; trans<num_useful_transitions; ++trans) {
-      fprintf(f,"%d %d %d %g\n",
-              transitions[trans].origin,
-              transitions[trans].dest,
-              transitions[trans].word,
-              transitions[trans].trans_prob);
+      f->printf("%d %d %d %g\n",
+                transitions[trans].origin,
+                transitions[trans].dest,
+                transitions[trans].word,
+                transitions[trans].trans_prob);
     }
   }
 
@@ -438,30 +447,29 @@ namespace Arpa2Lira {
     sort_transitions();
 
     fprintf(stderr,"opening file \"%s\"\n",liraFilename);
-    FILE *f = fopen(liraFilename,"w");
-
-    fprintf(f,"# number of words and words\n%d\n",voc.get_vocab_size());
-    voc.writeDictionary(f);
-    fprintf(f,"# max order of n-gram\n%d\n",ngramOrder);
-    fprintf(f,"# number of states\n%d\n",num_useful_states);
-    fprintf(f,"# number of transitions\n%d\n",num_useful_transitions);
-    fprintf(f,"# bound max trans prob\n%f\n",max_bound);
+    
+    SharedPtr<StreamInterface> f = openFile(liraFilename,"w");
+    f->printf("# number of words and words\n%d\n",voc.get_vocab_size());
+    voc.writeDictionary(f.get());
+    f->printf("# max order of n-gram\n%d\n",ngramOrder);
+    f->printf("# number of states\n%d\n",num_useful_states);
+    f->printf("# number of transitions\n%d\n",num_useful_transitions);
+    f->printf("# bound max trans prob\n%f\n",max_bound);
     
     int different_fan_outs = fan_out_dict.size();
-    fprintf(f,"# how many different number of transitions\n%d\n"
-            "# \"x y\" means x states have y transitions\n",
-            different_fan_outs);
+    f->printf("# how many different number of transitions\n%d\n"
+              "# \"x y\" means x states have y transitions\n",
+              different_fan_outs);
     for (int2int_dict_type::iterator it = fan_out_dict.begin();
          it != fan_out_dict.end();
          ++it) {
-      fprintf(f,"%d %d\n",it->second,it->first);
+      f->printf("%d %d\n",it->second,it->first);
     }
 
-    write_lira_states(f);
-    write_lira_transitions(f);
+    write_lira_states(f.get());
+    write_lira_transitions(f.get());
 
     fprintf(stderr,"closing file \"%s\"\n",liraFilename);
-    fclose(f);
   }    
 
   void BinarizeArpa::processArpa() {
@@ -483,10 +491,7 @@ namespace Arpa2Lira {
       extractNgramLevel(level);
     }
     fprintf(stderr,"%d states, %d transitions\n",num_states,num_transitions);
-
-    fprintf(stderr,"releasing arpa file\n");
     release_mmapped_buffer(input_arpa_file);
-    fprintf(stderr,"released\n");
   }
 
 } // namespace Arpa2Lira

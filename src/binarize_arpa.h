@@ -64,7 +64,7 @@ namespace Arpa2Lira {
     unsigned int operator()(AprilUtils::constString cs) const {
       return vocabDictionary.find(std::string((const char *)cs, cs.len()))->second;
     }
-    void writeDictionary(FILE *f) const {
+    void writeDictionary(AprilIO::StreamInterface *f) const {
       std::vector<const char*> vec;
       vec.resize(vocabSize,"ERROR");
       for (dictType::const_iterator it = vocabDictionary.begin();
@@ -72,7 +72,7 @@ namespace Arpa2Lira {
            ++it)
         vec[it->second-1] = it->first.c_str();
       for (unsigned int i=0; i<vocabSize; ++i)
-        fprintf(f,"%s\n",vec[i]);
+        f->printf("%s\n",vec[i]);
     }
   };
 
@@ -99,7 +99,7 @@ namespace Arpa2Lira {
   };
 
   struct mmapped_file_data {
-    AprilUtils::UniquePtr<char []> filename;
+    // NOT USED AprilUtils::UniquePtr<char []> filename;
     int file_descriptor;
     size_t file_size;
     char *file_mmapped;
@@ -186,8 +186,8 @@ namespace Arpa2Lira {
     void rename_transitions();
     void sort_transitions();
 
-    void write_lira_states(FILE *f);
-    void write_lira_transitions(FILE *f);
+    void write_lira_states(AprilIO::StreamInterface *f);
+    void write_lira_transitions(AprilIO::StreamInterface *f);
 
   public:
     BinarizeArpa(const char *vocabFilename,

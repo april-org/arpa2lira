@@ -1,12 +1,15 @@
-CFLAGS := $(shell pkg-config --cflags april-ann ) -Wall -std=c++11 -O3 -I/usr/local/include/hat-trie
-LIBS := $(shell pkg-config --libs april-ann hat-trie-0.1)  -L/usr/local/include/hat-trie
+CFLAGS := $(shell pkg-config --cflags april-ann) -Wall -std=c++11 -O3 -I /usr/local/include/hat-trie
+LIBS := $(shell pkg-config --libs april-ann hat-trie-0.1) -lhat-trie
 
-OBJS = binarize_arpa.o config.o murmur_hash.o
+OBJS = arpa2lira.o binarize_arpa.o config.o murmur_hash.o
 
-all: $(OBJS)
+all: arpa2lira
+
+arpa2lira: $(OBJS)
+	$(CXX) $(OBJS) -o $@ $(LIBS)
 
 %.o: %.cc
-	$(CXX) -c $(CFLAGS) $< -o $@ $(LIBS)
+	$(CXX) -c $(CFLAGS) $< -o $@
 
 clean:
 	rm -f $(OBJS)

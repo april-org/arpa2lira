@@ -1,13 +1,15 @@
-CFLAGS := $(shell pkg-config --cflags april-ann) -Wall -std=c++11 -O3 -lhat-trie
-LIBS := $(shell pkg-config --libs april-ann hat-trie-0.1)  -I /usr/local/include/hat-trie
+CFLAGS := $(shell pkg-config --cflags april-ann) -Wall -std=c++11 -O3 -I /usr/local/include/hat-trie
+LIBS := $(shell pkg-config --libs april-ann hat-trie-0.1) -lhat-trie
 
 SRC := ../src
+
+OBJS := $(SRC)/binarize_arpa.o $(SRC)/config.o $(SRC)/murmur_hash.o
 
 all: test_binarize_arpa
 
 test_binarize_arpa:
 	$(MAKE) -C ../src
-	$(CXX) $(SRC)/*.o -o test_binarize_arpa test_binarize_arpa.cc $(CFLAGS) $(LIBS)
+	$(CXX) $(OBJS) -o test_binarize_arpa test_binarize_arpa.cc $(CFLAGS) $(LIBS)
 
 clean:
 	$(MAKE) -C ../src clean
