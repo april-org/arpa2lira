@@ -162,6 +162,7 @@ namespace Arpa2Lira {
     void add_fan_out(int f);
 
     bool exists_state(int *v, int n, int &st);
+    void initialize_state(int st);
     int get_state(int *v, int sz);
 
     void read_mmapped_buffer(mmapped_file_data &filedata, const char *filename);
