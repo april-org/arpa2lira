@@ -147,8 +147,8 @@ namespace Arpa2Lira {
     for (int level=0; level<ngramOrder; ++level) {
       max_num_states += counts[level];
     }
-    max_num_transitions += max_num_states + counts[ngramOrder-1];
-
+    max_num_transitions += max_num_states;
+    
     // actually create two vectors in a mmapped buffer
     create_mmapped_buffer(states_data, sizeof(StateData)*max_num_states);
     states = (StateData*) states_data.file_mmapped;
@@ -156,15 +156,8 @@ namespace Arpa2Lira {
     transitions = (TransitionData*) transitions_data.file_mmapped;
 
     // initialize zerogram_st and final_st
-    states[final_st].fan_out = 0;
-    states[final_st].backoff_dest = no_backoff;
-    states[final_st].best_prob = logZero;
-    states[final_st].backoff_weight = logZero;
-    states[zerogram_st].fan_out = 0;
-    states[zerogram_st].backoff_dest = no_backoff;
-    states[zerogram_st].best_prob = logZero;
-    states[zerogram_st].backoff_weight = logZero;
-
+    initialize_state(final_st);
+    initialize_state(zerogram_st);
   }
 
   bool BinarizeArpa::exists_state(int *v, int n, int &st) {
@@ -178,6 +171,13 @@ namespace Arpa2Lira {
     return ngram_dict.get((const char*)v,sizeof(int)*n,st);
   }
 
+  void BinarizeArpa::initialize_state(int st) {
+    states[st].fan_out = 0;
+    states[st].backoff_dest = no_backoff;
+    states[st].best_prob = logZero;
+    states[st].backoff_weight = logZero;
+  }
+
   int BinarizeArpa::get_state(int *v, int n) {
     int st =0;
     if (n<1)
@@ -187,10 +187,7 @@ namespace Arpa2Lira {
     else if (!ngram_dict.get((const char*)v,sizeof(int)*n,st)) {
       st = num_states++;
       assert(num_states <= max_num_states && " max num states exceeded\n");
-      states[st].fan_out = 0;
-      states[st].backoff_dest = no_backoff;
-      states[st].best_prob = logZero;
-      states[st].backoff_weight = logZero;
+      initialize_state(st);
       ngram_dict.set((const char*)v,sizeof(int)*n,st);
     }
     return st;
@@ -221,11 +218,10 @@ namespace Arpa2Lira {
     int numNgrams = counts[level-1];
 
     for (int i=0; i<numNgrams; ++i) {
-      if (i>0 && i%1000==0) {
+      if (i>0 && i%10000==0) {
         fprintf(stderr,"\r%6.2f%%",i*100.0f/numNgrams);
       }
       constString cs = workingInput.extract_line();
-      constString cscopy = cs;
       float trans,bo;
       cs.extract_float(&trans);
       trans = arpa_prob(trans);
@@ -249,10 +245,6 @@ namespace Arpa2Lira {
       orig_state = get_state(ngramvec,level-1);
       assert(orig_state != final_st);
       dest_state = get_state(ngramvec+from,dest_size);
-
-      if (orig_state == dest_state)
-        fprintf(stderr,"FLAUTA %d %d %f %f %s\n",orig_state,dest_state,trans,bo,
-                cscopy.newString());
 
       if (dest_state != final_st &&
           states[dest_state].backoff_dest == no_backoff &&
@@ -316,7 +308,6 @@ namespace Arpa2Lira {
   }
   
   void BinarizeArpa::bypass_backoff_useless_states_and_compute_fanout() {
-    fprintf(stderr,"add fan out final st %d\n",states[final_st].fan_out);
     add_fan_out(states[final_st].fan_out);
     num_useful_states = num_states;
     for (int st=final_st+1; st<num_states; ++st) {
@@ -340,15 +331,14 @@ namespace Arpa2Lira {
       if (!is_useless_state(transitions[trans].origin)) {
         num_useful_transitions++;
         while (is_useless_state(transitions[trans].dest)) {
-          transitions[trans].dest = states[transitions[trans].dest].backoff_dest;
           transitions[trans].trans_prob += states[transitions[trans].dest].backoff_weight;
+          transitions[trans].dest = states[transitions[trans].dest].backoff_dest;
         }
       }
     }
   }
   
   void BinarizeArpa::rename_states() {
-    fprintf(stderr,"%d useful states\n",num_useful_states);
     cod2state = new int[num_useful_states];
     int aux_cont_states = 0;
 
@@ -358,7 +348,6 @@ namespace Arpa2Lira {
          it != fan_out_dict.end();
          ++it) {
       first_state_dict[it->first] = aux_cont_states;
-      fprintf(stderr,"%d = %d\n",it->first,aux_cont_states);
       aux_cont_states += it->second;
     }
     assert(aux_cont_states == num_useful_states);
@@ -380,10 +369,10 @@ namespace Arpa2Lira {
       }
     }
     for (int st=0; st<num_states; ++st) {
-      if (states[st].backoff_dest != no_backoff)
+      if (!is_useless_state(st) &&
+          states[st].backoff_dest != no_backoff)
         states[st].backoff_dest = renamed_state(states[st].backoff_dest);
     }
-    fprintf(stderr,"LLEGO HASTA AQUI\n");
   }
 
   void BinarizeArpa::rename_transitions() {
@@ -408,7 +397,7 @@ namespace Arpa2Lira {
     for (int cod=0; cod<num_useful_states; ++cod) {
       int st = cod2state[cod];
       if (st < num_states)
-        fprintf(f,"%d %d %f %f\n",
+        fprintf(f,"%d %d %g %g\n",
                 cod,
                 states[st].backoff_dest,
                 states[st].backoff_weight,
@@ -419,11 +408,11 @@ namespace Arpa2Lira {
   void BinarizeArpa::write_lira_transitions(FILE *f) {
     fprintf(f,"# transitions\n# orig dest word prob\n");
     for (int trans=0; trans<num_useful_transitions; ++trans) {
-        fprintf(f,"%d %d %d %f\n",
-                transitions[trans].origin,
-                transitions[trans].dest,
-                transitions[trans].word,
-                transitions[trans].trans_prob);
+      fprintf(f,"%d %d %d %g\n",
+              transitions[trans].origin,
+              transitions[trans].dest,
+              transitions[trans].word,
+              transitions[trans].trans_prob);
     }
   }
 
@@ -431,38 +420,31 @@ namespace Arpa2Lira {
     // compute getBestProb
     fprintf(stderr,"computing best prob\n");
     compute_best_prob();
-    fprintf(stderr,"computed!\n");
 
     // detect states with fanout zero which are not final, they are to
     // be removed
     fprintf(stderr,"bypassing states to be removed for backoff purposes\n");
     bypass_backoff_useless_states_and_compute_fanout();
-    fprintf(stderr,"bypassed!\n");
 
     fprintf(stderr,"bypassing useless destination states\n");
     bypass_destination_useless_states();
-    fprintf(stderr,"bypassed!\n");
-
+    
     fprintf(stderr,"renaming states\n");
     rename_states();
-    fprintf(stderr,"renamed!\n");
 
     fprintf(stderr,"renaming transitions\n");
     rename_transitions();
-    fprintf(stderr,"renamed!\n");
 
     // sort the vector of transitions first by renamed origin state
     // and second by word
     fprintf(stderr,"sorting transitions\n");
     sort_transitions();
-    fprintf(stderr,"sorted!\n");
 
     fprintf(stderr,"opening file \"%s\"\n",liraFilename);
     FILE *f = fopen(liraFilename,"w");
 
     fprintf(f,"# number of words and words\n%d\n",voc.get_vocab_size());
     voc.writeDictionary(f);
-    fprintf(stderr,"dictionary written!\n");
     fprintf(f,"# max order of n-gram\n%d\n",ngramOrder);
     fprintf(f,"# number of states\n%d\n",num_useful_states);
     fprintf(f,"# number of transitions\n%d\n",num_useful_transitions);
@@ -481,6 +463,7 @@ namespace Arpa2Lira {
     write_lira_states(f);
     write_lira_transitions(f);
 
+    fprintf(stderr,"closing file \"%s\"\n",liraFilename);
     fclose(f);
   }    
 
