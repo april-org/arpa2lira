@@ -32,9 +32,9 @@
 #include <map>
 #include <vector>
 
-#include "constString.h"
-#include "error_print.h"
-#include "smart_ptr.h"
+#include "april-ann/constString.h"
+#include "april-ann/error_print.h"
+#include "april-ann/smart_ptr.h"
 
 #include "hat_trie_dict.h"
 

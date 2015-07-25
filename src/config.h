@@ -23,8 +23,8 @@
 #include <string>
 
 // from APRIL
-#include "smart_ptr.h"
-#include "vector.h"
+#include "april-ann/smart_ptr.h"
+#include "april-ann/vector.h"
 
 // from Arpa2Lira
 #include "thread_pool.h"
