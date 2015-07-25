@@ -113,8 +113,6 @@ namespace Arpa2Lira {
     static const int MAX_NGRAM_ORDER=20;
     int counts[MAX_NGRAM_ORDER];
     int ngramvec[MAX_NGRAM_ORDER];
-    char *mmappedInput;
-    size_t inputFilesize;
     AprilUtils::constString inputFile,workingInput;
     int ngramOrder;
 
