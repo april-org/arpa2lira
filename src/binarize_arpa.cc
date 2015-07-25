@@ -29,10 +29,7 @@ extern "C" {
 #include <cstring>
 
 // from APRIL
-#include "april-ann/error_print.h"
-#include "april-ann/qsort.h"
-#include "april-ann/smart_ptr.h"
-#include "april-ann/unused_variable.h"
+#include "april-ann.h"
 
 // from Arpa2Lira
 #include "binarize_arpa.h"
