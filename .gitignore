@@ -6,12 +6,12 @@
 
 # Building dirs #
 #################
-build_*
 bin
 include
 lib
 *.o
 test/test_binarize_arpa
+src/arpa2lira
 
 # Emacs backups #
 #################

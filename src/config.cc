@@ -31,8 +31,7 @@ extern "C" {
 }
 
 // from APRIL
-#include "error_print.h"
-#include "smart_ptr.h"
+#include "april-ann.h"
 
 // from Arpa2Lira
 #include "config.h"
