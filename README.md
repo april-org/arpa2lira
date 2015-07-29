@@ -3,4 +3,4 @@ Standalone implementation of arpa2lira for APRIL toolkit.
 
 ## Dependencies
 
-Requires [hat-trie](git@github.com:luikore/hat-trie.git)
+Requires [hat-trie](https://github.com/luikore/hat-trie)
